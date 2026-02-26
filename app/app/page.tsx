@@ -106,8 +106,7 @@ export default function LandingPage() {
   useEffect(() => {
     if (user) {
       if (user.role === 'student') router.push('/dashboard');
-      else if (user.role === 'expert') router.push('/expert/dashboard');
-      else router.push('/admin');
+      else router.push('/expert/dashboard');
     }
   }, [user, router]);
 

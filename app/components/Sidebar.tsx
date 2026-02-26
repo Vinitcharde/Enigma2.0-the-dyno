@@ -23,11 +23,6 @@ const EXPERT_LINKS = [
   { href: '/expert/bookings', icon: Users, label: 'My Bookings' },
 ];
 
-const ADMIN_LINKS = [
-  { href: '/admin', icon: LayoutDashboard, label: 'Overview' },
-  { href: '/admin/users', icon: Users, label: 'Users' },
-];
-
 export default function Sidebar() {
   const { user, logout } = useAuth();
   const router = useRouter();
@@ -35,9 +30,9 @@ export default function Sidebar() {
 
   if (!user) return null;
 
-  const links = user.role === 'student' ? STUDENT_LINKS : user.role === 'expert' ? EXPERT_LINKS : ADMIN_LINKS;
-  const roleColor = { student: '#a78bfa', expert: '#22d3ee', admin: '#f87171' }[user.role];
-  const roleLabel = { student: 'Student', expert: 'Expert', admin: 'Admin' }[user.role];
+  const links = user.role === 'student' ? STUDENT_LINKS : EXPERT_LINKS;
+  const roleColor = { student: '#a78bfa', expert: '#22d3ee' }[user.role];
+  const roleLabel = { student: 'Student', expert: 'Expert' }[user.role];
 
   return (
     <aside className="sidebar">
@@ -71,7 +66,7 @@ export default function Sidebar() {
       {/* Navigation */}
       <nav style={{ flex: 1, padding: '12px 0', overflowY: 'auto' }}>
         {links.map(({ href, icon: Icon, label }) => {
-          const isActive = pathname === href || (href !== '/dashboard' && href !== '/expert/dashboard' && href !== '/admin' && pathname.startsWith(href));
+          const isActive = pathname === href || (href !== '/dashboard' && href !== '/expert/dashboard' && pathname.startsWith(href));
           return (
             <button key={href} className={`sidebar-link ${isActive ? 'active' : ''}`} onClick={() => router.push(href)}>
               <Icon size={18} />

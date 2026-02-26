@@ -54,8 +54,8 @@ export default function LoginPage() {
     }
   };
 
-  const quickLogin = (type: 'student' | 'admin') => {
-    setEmail(`${type}@demo.com`);
+  const quickLogin = () => {
+    setEmail('student@demo.com');
     setPassword('demo123');
   };
 
@@ -91,11 +91,8 @@ export default function LoginPage() {
           <div style={{ marginBottom: 28 }}>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 10, fontWeight: 500 }}>QUICK ACCESS</p>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => quickLogin('student')} className="btn-ghost" style={{ flex: 1, padding: '8px', fontSize: '0.8rem', textTransform: 'capitalize' }}>
+              <button onClick={() => quickLogin()} className="btn-ghost" style={{ flex: 1, padding: '8px', fontSize: '0.8rem', textTransform: 'capitalize' }}>
                 <Zap size={12} style={{ marginRight: 4 }} /> Student
-              </button>
-              <button onClick={() => quickLogin('admin')} className="btn-ghost" style={{ flex: 1, padding: '8px', fontSize: '0.8rem', textTransform: 'capitalize' }}>
-                <Zap size={12} style={{ marginRight: 4 }} /> Admin
               </button>
             </div>
           </div>

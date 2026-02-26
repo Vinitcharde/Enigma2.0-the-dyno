@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
-export type UserRole = 'student' | 'expert' | 'admin';
+export type UserRole = 'student' | 'expert';
 
 export interface User {
   id: string;
@@ -59,12 +59,7 @@ const MOCK_USERS: User[] = [
     linkedin: 'https://linkedin.com/in/arjun-sharma',
     github: 'https://github.com/arjun-sharma',
   },
-  {
-    id: 'admin-1',
-    email: 'admin@demo.com',
-    name: 'Platform Admin',
-    role: 'admin',
-  },
+
   // ── Full Stack Developer Experts ────────────────────────────────────
   {
     id: 'expert-fs1',

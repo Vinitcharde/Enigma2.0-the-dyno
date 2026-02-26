@@ -17,7 +17,7 @@
 
 **PlaceAI** is a full-stack AI-driven placement preparation platform that bridges the gap between coding practice and real-world interview readiness. It combines **AI-powered interview simulations**, **human expert mock interviews**, **adaptive aptitude analytics**, and **ATS resume analysis** into a single, unified platform.
 
-Built with **Next.js 16 (App Router)**, **React 19**, **TypeScript**, and powered by **SambaNova AI (Meta-Llama models)**, it delivers a modern dark-themed glassmorphism UI with role-based access for **Students**, **Industry Experts**, and **Admins**.
+Built with **Next.js 16 (App Router)**, **React 19**, **TypeScript**, and powered by **SambaNova AI (Meta-Llama models)**, it delivers a modern dark-themed glassmorphism UI with role-based access for **Students** and **Industry Experts**.
 
 ---
 
@@ -83,14 +83,6 @@ Built with **Next.js 16 (App Router)**, **React 19**, **TypeScript**, and powere
 - AI-generated personalized improvement plan (5 recommendations)
 - Placement Readiness score
 
-### 🏢 Admin Platform Dashboard
-- **Area chart**: User growth over 7 months (students vs experts)
-- **Pie chart**: Placement status distribution
-- **Bar chart**: Weekly interview sessions (AI vs Human, per day)
-- Most practiced job roles rankings
-- KPIs: Total Users, AI Interviews, Aptitude Tests, Placement Rate
-- System Health: API Uptime, Avg Response Time, Flagged Sessions, Expert Rating
-
 ### 👤 Profile Management
 - 4-tab profile editor: Basic Info, Education, Skills, Links & Resume
 - 27 quick-add popular skill suggestions
@@ -101,8 +93,7 @@ Built with **Next.js 16 (App Router)**, **React 19**, **TypeScript**, and powere
 ### 🔐 Role-Based Access Control
 - **Student**: Dashboard, Profile, Aptitude Quiz, AI Interview, Book Expert, Analytics
 - **Expert**: Dashboard, Availability Management, Bookings
-- **Admin**: Platform Overview, User Management
-- Quick demo login with one-click access for all 3 roles
+- Quick demo login with one-click access for Student and Expert roles
 
 ---
 
@@ -135,7 +126,6 @@ app/
 │   ├── page.tsx                          # Landing page (marketing/splash)
 │   ├── layout.tsx                        # Root layout with providers
 │   ├── globals.css                       # Dark theme design system
-│   ├── admin/page.tsx                    # Admin analytics dashboard
 │   ├── analytics/page.tsx                # Student performance analytics
 │   ├── aptitude/
 │   │   ├── page.tsx                      # Aptitude quiz hub
@@ -216,8 +206,7 @@ Quick-access demo accounts are available on the login page:
 | Role | Email | Password |
 |---|---|---|
 | **Student** | `student@demo.com` | `demo123` |
-| **Expert** | `expert@demo.com` | `demo123` |
-| **Admin** | `admin@demo.com` | `demo123` |
+| **Expert** | Select any expert from dropdown | `demo123` |
 
 ---
 
