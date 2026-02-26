@@ -80,7 +80,7 @@ export default function DashboardPage() {
           { label: 'Quizzes Done', value: String(stats.quizzesDone || 0), change: '', icon: BookOpen, color: '#34d399', bg: 'rgba(16,185,129,0.1)' },
           { label: 'Expert Sessions', value: String(stats.expertSessions || 0), change: '', icon: Star, color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' },
         ]);
-      }).catch(() => {});
+      }).catch(() => { });
 
     // Fetch recent activity
     fetch(`/api/db?action=getRecentActivity&email=${email}&limit=5`)
@@ -93,7 +93,7 @@ export default function DashboardPage() {
           time: timeAgo(a.created_at),
           score: a.score || null,
         })));
-      }).catch(() => {});
+      }).catch(() => { });
 
     // Fetch quiz stats per section
     fetch(`/api/db?action=getQuizStats&email=${email}`)
@@ -107,7 +107,7 @@ export default function DashboardPage() {
           color: COLORS[s.section] || '#a78bfa',
           attempts: s.attempts,
         })));
-      }).catch(() => {});
+      }).catch(() => { });
   }, [user]);
 
   // Poll for new notifications from DB
@@ -128,10 +128,10 @@ export default function DashboardPage() {
             fetch('/api/db', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ action: 'markNotificationRead', id: unread.id }),
-            }).catch(() => {});
+            }).catch(() => { });
           }
         }
-      } catch {}
+      } catch { }
     };
 
     checkNotifications();
@@ -443,10 +443,10 @@ export default function DashboardPage() {
               <h2 style={{ fontSize: '1rem', fontWeight: 700, color: 'white', marginBottom: 16 }}>⚡ Quick Actions</h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {[
-                  { label: 'Start AI Interview', desc: 'DSA + Behavioral', color: '#a78bfa', href: '/interview/ai' },
+                  { label: 'Start HR Interview', desc: 'Focus on communication', color: '#f43f5e', href: '/interview/ai?type=hr' },
+                  { label: 'Start Tech Interview', desc: 'DSA + Behavioral', color: '#a78bfa', href: '/interview/ai' },
                   { label: 'Take Aptitude Quiz', desc: 'Quant • Logical • Verbal', color: '#22d3ee', href: '/aptitude' },
                   { label: 'Book Expert Session', desc: 'Available today', color: '#34d399', href: '/interview/book' },
-                  { label: 'Update Resume Skills', desc: 'Improve recommendations', color: '#f59e0b', href: '/profile' },
                 ].map(({ label, desc, color, href }) => (
                   <button key={label} onClick={() => router.push(href)} style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',

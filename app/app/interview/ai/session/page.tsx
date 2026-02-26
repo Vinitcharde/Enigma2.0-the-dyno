@@ -39,7 +39,7 @@ function InterviewSessionContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const role = searchParams.get('role') || user?.targetRole || 'Full Stack Developer';
-  const type = (searchParams.get('type') || 'full') as 'full' | 'dsa' | 'behavioral';
+  const type = (searchParams.get('type') || 'full') as 'full' | 'dsa' | 'behavioral' | 'hr';
   const difficulty = searchParams.get('difficulty') || 'medium';
 
   const [phase, setPhase] = useState<Phase>('loading');
@@ -82,7 +82,7 @@ function InterviewSessionContent() {
       .then(data => {
         if (data.questions?.length) { setQuestions(data.questions); setUsedAI(data.usedAI ?? false); }
       })
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => { clearInterval(interval); setPhase('intro'); });
   }, []);
 
@@ -101,18 +101,40 @@ function InterviewSessionContent() {
       }
     };
     document.addEventListener('visibilitychange', handler);
-    return () => document.removeEventListener('visibilitychange', handler);
   }, [phase]);
+
+  // Cleanup speech on unmount
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
 
   const addMessage = (r: 'ai' | 'user', content: string) => {
     setMessages(m => [...m, { role: r, content }]);
+
+    if (r === 'ai' && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      // Remove decorators to make speech sound better
+      const cleanText = content.replace(/[*_#]/g, '').replace(/━━━━━━━━━━━━━━━━━━━━━━━/g, '').replace(/💡|🎯|✨|🎉|✅|✓|✗|📌/g, '');
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      const voices = window.speechSynthesis.getVoices();
+      const preferred = voices.find(v => v.name.includes('Google US English') || v.name.includes('Samantha') || v.lang === 'en-US');
+      if (preferred) utterance.voice = preferred;
+      utterance.rate = 1.05;
+      utterance.pitch = 0.95;
+      window.speechSynthesis.speak(utterance);
+    }
+
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
   };
 
   const startSession = () => {
     setShowFullscreenPrompt(false);
-    document.documentElement.requestFullscreen?.().catch(() => {});
-    setPhase('coding');
+    document.documentElement.requestFullscreen?.().catch(() => { });
+    setPhase(type === 'hr' ? 'voice' : 'coding');
     setAiTyping(true);
     const q = questions[0];
     const skillMention = skills.length > 0 ? ` I can see from your resume that you have experience with ${skills.slice(0, 3).join(', ')} — I'll tailor my questions accordingly.` : '';
@@ -150,6 +172,7 @@ function InterviewSessionContent() {
   const toggleVoice = () => {
     if (isRecording) { recognitionRef.current?.stop(); setIsRecording(false); return; }
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
       const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       const rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US';
       rec.onresult = (e: any) => setTranscript(Array.from(e.results).map((r: any) => r[0].transcript).join(''));
@@ -162,7 +185,27 @@ function InterviewSessionContent() {
     addMessage('user', text);
     setTranscript(''); setUserInput('');
     setAiTyping(true);
-    setScores(s => ({ ...s, communication: Math.min(100, s.communication + 15), problemSolving: Math.min(100, s.problemSolving + 10) }));
+    setScores(s => {
+      let newScores = { ...s };
+      if (type === 'hr') {
+        const words = text.split(/\s+/).length;
+        const sentences = text.match(/[^.!?]+[.!?]+/g)?.length || 1;
+        const avgWords = words / sentences;
+        const sentScore = (avgWords >= 8 && avgWords <= 25) ? 100 : (avgWords < 8 ? 60 : 70);
+
+        const keywords = ['team', 'leadership', 'challenge', 'collaboration', 'agile', 'conflict', 'resolved', 'goal', 'achieved', 'communication', 'manager', 'driven', 'impact', 'strategy', 'aligned'];
+        const matched = keywords.filter(k => text.toLowerCase().includes(k)).length;
+        const keyScore = Math.min(100, matched * 20 + 40);
+
+        newScores.technical = Math.min(100, Math.round((s.technical * currentQIdx + sentScore) / (currentQIdx + 1))); // Structure
+        newScores.problemSolving = Math.min(100, Math.round((s.problemSolving * currentQIdx + keyScore) / (currentQIdx + 1))); // Keywords
+        newScores.communication = Math.min(100, s.communication + 15);
+      } else {
+        newScores.communication = Math.min(100, s.communication + 15);
+        newScores.problemSolving = Math.min(100, s.problemSolving + 10);
+      }
+      return newScores;
+    });
     await new Promise(r => setTimeout(r, 1800));
     setAiTyping(false);
     const q = questions[currentQIdx];
@@ -195,12 +238,34 @@ function InterviewSessionContent() {
     setAiTyping(true);
     await new Promise(r => setTimeout(r, 2000));
     setAiTyping(false);
-    const finalScores = {
-      technical: 72 + Math.floor(Math.random() * 20),
-      problemSolving: 68 + Math.floor(Math.random() * 22),
-      communication: 75 + Math.floor(Math.random() * 18),
-      optimization: 65 + Math.floor(Math.random() * 25),
-    };
+
+    let finalScores;
+    if (type === 'hr') {
+      const userTexts = messages.filter(m => m.role === 'user').map(m => m.content).join(' ');
+      const words = userTexts.split(/\s+/).length || 1;
+      const sentences = userTexts.match(/[^.!?]+[.!?]+/g)?.length || 1;
+      const avgWords = words / sentences;
+      const sentenceScore = (avgWords >= 8 && avgWords <= 25) ? (85 + Math.floor(Math.random() * 10)) : (60 + Math.floor(Math.random() * 20));
+
+      const keywords = ['team', 'leadership', 'challenge', 'collaboration', 'agile', 'conflict', 'resolved', 'goal', 'achieved', 'communication', 'manager', 'impact', 'strategy', 'aligned'];
+      const matched = keywords.filter(k => userTexts.toLowerCase().includes(k)).length;
+      const keywordScore = Math.min(100, matched * 15 + 40);
+
+      finalScores = {
+        technical: sentenceScore,
+        problemSolving: keywordScore,
+        communication: 75 + Math.floor(Math.random() * 18),
+        optimization: 70 + Math.floor(Math.random() * 20),
+      };
+    } else {
+      finalScores = {
+        technical: 72 + Math.floor(Math.random() * 20),
+        problemSolving: 68 + Math.floor(Math.random() * 22),
+        communication: 75 + Math.floor(Math.random() * 18),
+        optimization: 65 + Math.floor(Math.random() * 25),
+      };
+    }
+
     setScores(finalScores);
     const overall = Math.round(finalScores.technical * 0.4 + finalScores.problemSolving * 0.25 + finalScores.communication * 0.2 + finalScores.optimization * 0.15);
 
@@ -227,17 +292,17 @@ function InterviewSessionContent() {
             completed: true,
           },
         }),
-      }).catch(() => {});
+      }).catch(() => { });
     }
 
     addMessage('ai', [
       `🎉 **Interview Complete!**`,
       ``,
       `**Overall Score: ${overall}/100**`,
-      `• Technical (40%): ${finalScores.technical}%`,
-      `• Problem Solving (25%): ${finalScores.problemSolving}%`,
-      `• Communication (20%): ${finalScores.communication}%`,
-      `• Optimization (15%): ${finalScores.optimization}%`,
+      `• ${type === 'hr' ? 'Sentence Structure' : 'Technical'} (40%): ${finalScores.technical}%`,
+      `• ${type === 'hr' ? 'Keyword Match' : 'Problem Solving'} (25%): ${finalScores.problemSolving}%`,
+      `• ${type === 'hr' ? 'Confidence' : 'Communication'} (20%): ${finalScores.communication}%`,
+      `• ${type === 'hr' ? 'Relevance' : 'Optimization'} (15%): ${finalScores.optimization}%`,
       ``,
       `📌 **Key Observations:**`,
       `• ${skills.length > 0 ? `Good coverage of ${skills.slice(0, 2).join(' and ')} concepts` : 'Solid foundational knowledge'}`,
@@ -247,7 +312,7 @@ function InterviewSessionContent() {
       `Check your detailed results on the right →`,
     ].join('\n'));
     setPhase('complete');
-    if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    if (document.exitFullscreen) document.exitFullscreen().catch(() => { });
   };
 
   const formatTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -321,7 +386,7 @@ function InterviewSessionContent() {
       </div>
 
       {/* Main layout */}
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '390px 1fr', overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: type === 'hr' && phase !== 'complete' ? '1fr' : '390px 1fr', overflow: 'hidden' }}>
         {/* Left: AI Chat */}
         <div style={{ borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-secondary)' }}>
           <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -406,7 +471,7 @@ function InterviewSessionContent() {
         </div>
 
         {/* Right: Code editor / Results */}
-        <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ display: type === 'hr' && phase !== 'complete' ? 'none' : 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {phase === 'complete' ? (
             <div style={{ flex: 1, overflowY: 'auto', padding: '36px' }}>
               <div style={{ maxWidth: 680, margin: '0 auto' }}>
@@ -426,10 +491,10 @@ function InterviewSessionContent() {
                 <div className="card-no-hover" style={{ padding: 24, marginBottom: 20 }}>
                   <h3 style={{ fontWeight: 700, color: 'white', marginBottom: 18, fontSize: '0.95rem' }}>Score Breakdown</h3>
                   {[
-                    { label: 'Technical', score: scores.technical, weight: '40%', color: '#a78bfa' },
-                    { label: 'Problem Solving', score: scores.problemSolving, weight: '25%', color: '#22d3ee' },
-                    { label: 'Communication', score: scores.communication, weight: '20%', color: '#34d399' },
-                    { label: 'Optimization', score: scores.optimization, weight: '15%', color: '#f59e0b' },
+                    { label: type === 'hr' ? 'Sentence Structure' : 'Technical', score: scores.technical, weight: '40%', color: '#a78bfa' },
+                    { label: type === 'hr' ? 'Keyword Match' : 'Problem Solving', score: scores.problemSolving, weight: '25%', color: '#22d3ee' },
+                    { label: type === 'hr' ? 'Confidence' : 'Communication', score: scores.communication, weight: '20%', color: '#34d399' },
+                    { label: type === 'hr' ? 'Relevance' : 'Optimization', score: scores.optimization, weight: '15%', color: '#f59e0b' },
                   ].map(({ label, score, weight, color }) => (
                     <div key={label} style={{ marginBottom: 16 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: '0.85rem' }}>
@@ -483,10 +548,10 @@ function InterviewSessionContent() {
               <div style={{ padding: '8px 18px', background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)', display: 'flex', gap: 24, alignItems: 'center' }}>
                 <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>LIVE SCORES:</span>
                 {[
-                  { label: 'Technical', val: scores.technical, color: '#a78bfa' },
-                  { label: 'Comm.', val: scores.communication, color: '#34d399' },
-                  { label: 'Problem Solving', val: scores.problemSolving, color: '#22d3ee' },
-                  { label: 'Optimization', val: scores.optimization, color: '#f59e0b' },
+                  { label: type === 'hr' ? 'Structure' : 'Technical', val: scores.technical, color: '#a78bfa' },
+                  { label: type === 'hr' ? 'Comm.' : 'Comm.', val: scores.communication, color: '#34d399' },
+                  { label: type === 'hr' ? 'Keywords' : 'Problem Solving', val: scores.problemSolving, color: '#22d3ee' },
+                  { label: type === 'hr' ? 'Relevance' : 'Optimization', val: scores.optimization, color: '#f59e0b' },
                 ].map(({ label, val, color }) => (
                   <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.76rem' }}>
                     <span style={{ color: 'var(--text-muted)' }}>{label}:</span>

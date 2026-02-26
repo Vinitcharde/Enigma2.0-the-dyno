@@ -21,6 +21,7 @@ const INTERVIEW_TYPES = [
   { id: 'full', label: 'Full Interview', desc: 'DSA + System Design + Behavioral (45-60 min)', icon: Zap, color: '#a78bfa', recommended: true },
   { id: 'dsa', label: 'DSA Focus', desc: 'Algorithm and data structure problems (30 min)', icon: Code2, color: '#22d3ee', recommended: false },
   { id: 'behavioral', label: 'Behavioral', desc: 'STAR method answers + communication scoring (20 min)', icon: Mic, color: '#34d399', recommended: false },
+  { id: 'hr', label: 'HR Interview', desc: 'Focuses on sentence structure and keyword usage (15 min)', icon: Mic, color: '#f43f5e', recommended: false },
 ];
 
 export default function AIInterviewSetupPage() {
