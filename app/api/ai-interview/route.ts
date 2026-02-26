@@ -60,6 +60,25 @@ async function callSambaNova(messages: ChatMessage[]): Promise<string> {
     return data.choices?.[0]?.message?.content || '';
 }
 
+// External ML QA Model Integration (HuggingFace Pipeline)
+async function callHuggingFaceQA(question: string, context: string): Promise<string | null> {
+    try {
+        const response = await fetch('https://api-inference.huggingface.co/models/deepset/roberta-base-squad2', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${process.env.HF_API_KEY || ''}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ inputs: { question, context } }),
+        });
+        if (!response.ok) return null;
+        const data = await response.json();
+        return data.answer || null;
+    } catch {
+        return null;
+    }
+}
+
 function buildResumeContext(resumeData: any): string {
     if (!resumeData) return '';
 
@@ -108,13 +127,21 @@ export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
         action = body.action || 'evaluate_response';
-        const { role, type, difficulty, question, code, language, userMessage, chatHistory, resumeData } = body;
+        const { role, type, difficulty, question, code, language, userMessage, chatHistory, resumeData, jd } = body;
 
         const resumeContext = buildResumeContext(resumeData);
 
+        let avatarContext = '';
+        if (type === 'avatar') {
+            avatarContext = `\n\n--- AVATAR HR MODE ---\nYou are Arjun, an expert AI HR Director. Conduct the interview strictly mimicking a real HR/Technical leader. Constantly push deeper with follow-up questions linked to core competencies (Communication, Problem-Solving, Leadership). You must actively grade their Sentence Formation, Vocabulary, and Keyword Rubric Usage.\n`;
+            if (jd) {
+                avatarContext += `\n\n--- TARGET JOB DESCRIPTION ---\n${jd}\n--- END JD ---\nThe candidate is applying specifically to this role. Prioritize the exact keywords, frameworks, and scenarios mentioned in this JD.\n`;
+            }
+        }
+
         // Build chat history in OpenAI format
         const messages: ChatMessage[] = [
-            { role: 'system', content: SYSTEM_PROMPT + resumeContext },
+            { role: 'system', content: SYSTEM_PROMPT + resumeContext + avatarContext },
         ];
 
         // Add conversation history
@@ -191,13 +218,22 @@ After providing the 3 optimizations, end your response EXACTLY with this voice p
             }
 
             case 'evaluate_response': {
+                let mlQaExtraction = '';
+                if (type === 'avatar' && jd) {
+                    // Inject real ML QA Model factual extraction
+                    const extractedFact = await callHuggingFaceQA(question, jd);
+                    if (extractedFact) {
+                        mlQaExtraction = `\n\n[ML QA MODEL SYSTEM NOTE]: A specialized deep-learning extractive QA model has parsed the Job Description and identified the following optimal factual answer snippet for this question: "${extractedFact}". Please strictly verify if the candidate's explanation aligns properly with this ML-extracted core fact.\n`;
+                    }
+                }
+
                 prompt = `You are interviewing for a **${role}** position (${difficulty} difficulty).
 
 The current question is: "${question}"
 
 The candidate just said:
 "${userMessage}"
-
+${mlQaExtraction}
 Based on the conversation history and this response:
 1. Evaluate the quality of their explanation — assess **clarity**, **technical accuracy**, **logical flow**, and **depth**
 2. Note any misconceptions or gaps in understanding
@@ -254,6 +290,7 @@ Keep response concise (1-2 paragraphs).`;
 
             case 'final_evaluation': {
                 prompt = `You are completing a **${role}** interview (${difficulty} difficulty, ${type} type).
+${type === 'avatar' ? 'As Arjun (HR Director), provide a Rubric-based feedback dashboard analysis tied strictly to competencies (Communication, Problem-Solving, Leadership, Sentence Formation, Keyword Usage). Evaluate their communication skill analysis based on syntax and technical terminology.' : ''}
 
 Based on the entire conversation history, provide a comprehensive final evaluation:
 

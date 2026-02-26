@@ -9,7 +9,7 @@ import dynamic from 'next/dynamic';
 import {
   Brain, Mic, MicOff, Play, Square, Send, Code2,
   AlertTriangle, Maximize, ChevronRight, Clock, X,
-  Volume2, VolumeX, Star, TrendingUp, Target, Zap, MessageSquare
+  Volume2, VolumeX, Star, TrendingUp, Target, Zap, MessageSquare, UserPlus
 } from 'lucide-react';
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), {
@@ -366,7 +366,8 @@ function InterviewSessionContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const role = searchParams.get('role') || 'Full Stack Developer';
-  const type = (searchParams.get('type') || 'full') as 'full' | 'dsa' | 'behavioral';
+  const type = (searchParams.get('type') || 'full') as 'full' | 'dsa' | 'behavioral' | 'avatar';
+  const jd = searchParams.get('jd') || '';
   const difficulty = searchParams.get('difficulty') || 'medium';
 
   const [phase, setPhase] = useState<Phase>('intro');
@@ -410,6 +411,7 @@ function InterviewSessionContent() {
           role,
           type,
           difficulty,
+          jd,
           question: currentQ.question,
           chatHistory: messages.map(m => ({ role: m.role, content: m.content })),
         }),
@@ -427,8 +429,10 @@ function InterviewSessionContent() {
 
   // Pick random questions from the pool once per session (stable within session, random across sessions)
   const questions = useMemo(() => {
-    const pool = AI_QUESTIONS[role]?.[type] || DEFAULT_QUESTIONS[type] || DEFAULT_QUESTIONS.full;
-    const count = type === 'full' ? 3 : type === 'dsa' ? 2 : 1;
+    let pool = AI_QUESTIONS[role]?.[type as 'full' | 'dsa' | 'behavioral'] || DEFAULT_QUESTIONS[type as 'full' | 'dsa' | 'behavioral'];
+    if (!pool && type === 'avatar') pool = DEFAULT_QUESTIONS.behavioral;
+    if (!pool) pool = DEFAULT_QUESTIONS.full;
+    const count = type === 'full' ? 3 : type === 'dsa' ? 2 : type === 'avatar' ? 5 : 1;
     return shufflePick(pool, Math.min(count, pool.length));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role, type]);
@@ -614,6 +618,18 @@ Estimated time complexity: ${complexity}`);
     setTranscript('');
     setUserInput('');
     setAiTyping(true);
+
+    if (type === 'avatar') {
+      const data = await callAI({ action: 'evaluate_response', userMessage: text });
+      setAiTyping(false);
+      if (data.response) {
+        addMessage('ai', data.response);
+      } else {
+        addMessage('ai', 'Interesting. Could you elaborate slightly more on that?');
+      }
+      setScores(s => ({ ...s, communication: Math.min(100, s.communication + 10), problemSolving: Math.min(100, s.problemSolving + 5) }));
+      return;
+    }
 
     if (phase === 'coding') {
       // During coding phase: user is asking questions or explaining their thought process
@@ -1041,6 +1057,67 @@ Estimated time complexity: ${complexity}`);
                   </button>
                   <button className="btn-secondary" onClick={() => router.push('/dashboard')} style={{ flex: 1, padding: '14px' }}>
                     Back to Dashboard
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : type === 'avatar' ? (
+            // HR Avatar View
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-card)', position: 'relative', overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: '500px', height: '500px', background: 'radial-gradient(circle, rgba(236,72,153,0.15) 0%, rgba(0,0,0,0) 70%)', filter: 'blur(40px)', zIndex: 0 }} />
+
+              <div style={{ position: 'relative', zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                {/* Immersive Avatar Character */}
+                <div style={{
+                  width: 320, height: 420, position: 'relative', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', marginBottom: -20
+                }}>
+                  {/* Glowing background behind avatar */}
+                  <div style={{
+                    position: 'absolute', bottom: 30, width: 220, height: 220, borderRadius: '50%',
+                    background: tts.isSpeaking ? 'rgba(236,72,153,0.4)' : 'rgba(236,72,153,0.1)',
+                    filter: 'blur(40px)', transition: 'all 0.3s ease-in-out',
+                    animation: tts.isSpeaking ? 'pulse 2s infinite' : 'none'
+                  }} />
+
+                  {/* Avatar Image */}
+                  <img
+                    src="/avatar.png"
+                    alt="AI HR Avatar"
+                    style={{
+                      height: '100%', objectFit: 'contain', position: 'relative', zIndex: 10,
+                      transition: 'filter 0.3s',
+                      filter: tts.isSpeaking ? 'drop-shadow(0 0 15px rgba(236,72,153,0.3))' : 'none'
+                    }}
+                  />
+                </div>
+
+                <div style={{ marginTop: 40, textAlign: 'center' }}>
+                  <h3 style={{ fontSize: '1.5rem', color: 'white', fontWeight: 800, marginBottom: 12 }}>Arjun (AI HR Director)</h3>
+                  <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginBottom: 24 }}>
+                    <span className="badge badge-purple" style={{ fontSize: '0.75rem' }}>Sentence Formation Tracking</span>
+                    <span className="badge badge-blue" style={{ fontSize: '0.75rem' }}>Keyword Rubric Analysis</span>
+                  </div>
+
+                  {/* Waveform Visualizer */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, height: 40, marginBottom: 40 }}>
+                    {[...Array(15)].map((_, i) => (
+                      <div key={i} style={{
+                        width: 4,
+                        background: tts.isSpeaking ? '#ec4899' : isRecording ? '#a78bfa' : '#4b5563',
+                        borderRadius: 2,
+                        height: tts.isSpeaking || isRecording ? 10 + Math.random() * 20 : 4,
+                        animation: tts.isSpeaking ? `ttsWave 0.5s ease-in-out ${i * 0.05}s infinite alternate` : isRecording ? `pulse 1s infinite alternate` : 'none',
+                        transition: 'height 0.2s, background 0.3s'
+                      }} />
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={() => { setPhase('complete'); finalizeSession(); }}
+                    className="btn-primary"
+                    style={{ background: 'linear-gradient(135deg, #ec4899 0%, #a78bfa 100%)', padding: '12px 24px', fontSize: '0.9rem', boxShadow: '0 0 20px rgba(236,72,153,0.3)' }}
+                  >
+                    End Interview & Generate Report
                   </button>
                 </div>
               </div>

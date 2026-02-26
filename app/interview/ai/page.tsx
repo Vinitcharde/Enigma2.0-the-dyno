@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import Sidebar from '@/components/Sidebar';
-import { Brain, Code2, Mic, Clock, Target, ChevronRight, Zap, Star, Shield } from 'lucide-react';
+import { Brain, Code2, Mic, Clock, Target, ChevronRight, Zap, Star, Shield, UserPlus } from 'lucide-react';
 
 const JOB_ROLES = [
   { role: 'Full Stack Developer', icon: '🌐', tags: ['React', 'Node.js', 'System Design'] },
@@ -21,6 +21,7 @@ const INTERVIEW_TYPES = [
   { id: 'full', label: 'Full Interview', desc: 'DSA + System Design + Behavioral (45-60 min)', icon: Zap, color: '#a78bfa', recommended: true },
   { id: 'dsa', label: 'DSA Focus', desc: 'Algorithm and data structure problems (30 min)', icon: Code2, color: '#22d3ee', recommended: false },
   { id: 'behavioral', label: 'Behavioral', desc: 'STAR method answers + communication scoring (20 min)', icon: Mic, color: '#34d399', recommended: false },
+  { id: 'avatar', label: 'HR Avatar Mode', desc: 'Immersive AI HR Avatar + JD Ingestion + Multi-format Rubric (30 min)', icon: UserPlus, color: '#ec4899', recommended: false },
 ];
 
 export default function AIInterviewSetupPage() {
@@ -29,12 +30,13 @@ export default function AIInterviewSetupPage() {
   const [selectedRole, setSelectedRole] = useState(user?.targetRole || '');
   const [selectedType, setSelectedType] = useState('full');
   const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
+  const [jd, setJd] = useState('');
 
   if (!user) return null;
 
   const handleStart = () => {
-    if (!selectedRole) return;
-    router.push(`/interview/ai/session?role=${encodeURIComponent(selectedRole)}&type=${selectedType}&difficulty=${difficulty}`);
+    if (!selectedRole && selectedType !== 'avatar') return;
+    router.push(`/interview/ai/session?role=${encodeURIComponent(selectedRole || 'Custom Role')}&type=${selectedType}&difficulty=${difficulty}${jd ? `&jd=${encodeURIComponent(jd)}` : ''}`);
   };
 
   return (
@@ -137,6 +139,24 @@ export default function AIInterviewSetupPage() {
               ))}
             </div>
           </div>
+
+          {/* Conditional Job Description Input for Avatar Mode */}
+          {selectedType === 'avatar' && (
+            <div className="card-no-hover" style={{ padding: 28, marginBottom: 32, background: 'linear-gradient(135deg, rgba(236,72,153,0.1) 0%, transparent 100%)', border: '1px solid rgba(236,72,153,0.3)' }}>
+              <h2 style={{ fontWeight: 700, color: 'white', marginBottom: 12, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <UserPlus size={18} color="#ec4899" /> 4. Ingest Job Description (Optional)
+              </h2>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: 16 }}>
+                Paste the specific JD. The AI Avatar will tailor its behavioral, technical, and case scenarios specifically to the keywords and requirements mentioned.
+              </p>
+              <textarea
+                value={jd}
+                onChange={e => setJd(e.target.value)}
+                placeholder="E.g., Looking for a senior developer proficient in Node.js, microservices architecture, and team leadership..."
+                style={{ width: '100%', height: 120, background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, color: 'white', fontSize: '0.9rem', resize: 'vertical' }}
+              />
+            </div>
+          )}
 
           {/* Anti-cheat notice */}
           <div style={{ padding: '14px 20px', borderRadius: 10, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', marginBottom: 24, display: 'flex', gap: 10, alignItems: 'center' }}>

@@ -6,7 +6,7 @@ import { useAuth } from '@/lib/auth-context';
 import Sidebar from '@/components/Sidebar';
 import {
   Brain, Code2, BookOpen, Calendar, TrendingUp, Target, Star, Clock,
-  ArrowRight, Zap, CheckCircle, AlertCircle, ChevronRight, Activity
+  ArrowRight, Zap, CheckCircle, AlertCircle, ChevronRight, Activity, UserPlus
 } from 'lucide-react';
 
 const RECENT_ACTIVITY = [
@@ -63,6 +63,9 @@ export default function DashboardPage() {
             <div style={{ display: 'flex', gap: 12 }}>
               <button className="btn-primary" onClick={() => router.push('/interview/ai')} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Zap size={16} /> Start AI Interview
+              </button>
+              <button className="btn-secondary" onClick={() => router.push('/interview/ai')} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(236,72,153,0.1)', color: '#ec4899', borderColor: 'rgba(236,72,153,0.3)', fontWeight: 700 }}>
+                <UserPlus size={16} /> HR Avatar Mode
               </button>
               <button className="btn-secondary" onClick={() => router.push('/aptitude')} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <BookOpen size={16} /> Take Quiz
@@ -203,6 +206,7 @@ export default function DashboardPage() {
               <h2 style={{ fontSize: '1rem', fontWeight: 700, color: 'white', marginBottom: 16 }}>⚡ Quick Actions</h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {[
+                  { label: 'HR Avatar Interview', desc: 'Immersive AI HR Mode', color: '#ec4899', href: '/interview/ai' },
                   { label: 'Start AI Interview', desc: 'DSA + Behavioral', color: '#a78bfa', href: '/interview/ai' },
                   { label: 'Take Aptitude Quiz', desc: 'Quant • Logical • Verbal', color: '#22d3ee', href: '/aptitude' },
                   { label: 'Book Expert Session', desc: 'Available today', color: '#34d399', href: '/interview/book' },
