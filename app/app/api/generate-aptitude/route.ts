@@ -82,7 +82,7 @@ CRITICAL RULES:
       )
       .slice(0, count);
 
-    if (validated.length < 5) {
+    if (validated.length < Math.max(3, Math.ceil(count / 3))) {
       throw new Error('Too few valid questions generated');
     }
 
