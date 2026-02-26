@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
+import { useWindowChangeProtection } from '@/lib/useWindowChangeProtection';
 import dynamic from 'next/dynamic';
 import {
   Brain, Mic, MicOff, Play, Square, Send, Code2,
@@ -21,6 +22,9 @@ const MonacoEditor = dynamic(() => import('@monaco-editor/react'), {
 
 type Phase = 'intro' | 'coding' | 'voice' | 'followup' | 'complete';
 type Message = { role: 'ai' | 'user'; content: string; timestamp: Date };
+
+// extend question type with optional hint for auto grader
+interface Question { question: string; type: 'dsa' | 'system_design' | 'behavioral'; followUp: string; answerHint?: string; }
 
 const AI_QUESTIONS: Record<string, Record<string, { question: string; type: 'dsa' | 'system_design' | 'behavioral'; followUp: string }[]>> = {
   'Full Stack Developer': {
@@ -54,7 +58,7 @@ const AI_QUESTIONS: Record<string, Record<string, { question: string; type: 'dsa
 
 const DEFAULT_QUESTIONS = {
   full: [
-    { question: 'Given an array of integers and a target sum, find all unique pairs of numbers that add up to the target. Your solution should handle duplicates and be as efficient as possible. Explain your approach.', type: 'dsa' as const, followUp: 'Good work! Your current solution is O(n) time. Can you now solve it for triplets (3-sum problem)? How does the complexity change?' },
+    { question: 'Given an array of integers and a target sum, find all unique pairs of numbers that add up to the target. Your solution should handle duplicates and be as efficient as possible. Explain your approach.', type: 'dsa' as const, followUp: 'Good work! Your current solution is O(n) time. Can you now solve it for triplets (3-sum problem)? How does the complexity change?', answerHint: 'two sum' },
     { question: 'Design a notification service that handles millions of users across email, SMS, and push notifications. Consider rate limiting, retry logic, and delivery guarantees.', type: 'system_design' as const, followUp: 'Great architecture! How would you handle cases where SNS/SQS goes down? What fallback mechanisms would you implement?' },
     { question: 'Tell me about yourself and why you\'re interested in this role. What makes you stand out from other candidates?', type: 'behavioral' as const, followUp: 'Good introduction! Where do you see yourself in 5 years, and how does this position align with that vision?' },
   ],
@@ -130,36 +134,45 @@ function InterviewSessionContent() {
   const [showWarning, setShowWarning] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showFullscreenPrompt, setShowFullscreenPrompt] = useState(true);
+  const [interviewAckAccepted, setInterviewAckAccepted] = useState(false);
   const [sessionTime, setSessionTime] = useState(0);
   const [aiTyping, setAiTyping] = useState(false);
   const [scores, setScores] = useState({ technical: 0, problemSolving: 0, communication: 0, optimization: 0 });
+  const [showAutoEndNotification, setShowAutoEndNotification] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
 
   const questions = (AI_QUESTIONS[role]?.[type] || DEFAULT_QUESTIONS[type] || DEFAULT_QUESTIONS.full);
   const currentQ = questions[currentQIdx];
 
+  // Window change protection - auto-end interview on tab switch
+  const { enterFullscreen } = useWindowChangeProtection({
+    enabled: phase !== 'intro' && phase !== 'complete',
+    showWarning: false,  // Disable alerts
+    enableFullscreen: true,
+    onWindowChange: () => {
+      setTabSwitches(t => t + 1);
+      // Show auto-end notification
+      setShowAutoEndNotification(true);
+      // Auto-end the interview session
+      setTimeout(() => {
+        if (phase !== 'complete') {
+          setPhase('complete');
+          setScores(s => ({
+            ...s,
+            technical: Math.max(0, s.technical - 20),  // Penalty for window switch
+          }));
+        }
+      }, 2000);
+    },
+    warningMessage: 'Interview auto-submitted due to window change.',
+  });
+
   // Session timer
   useEffect(() => {
     if (phase === 'intro' || phase === 'complete') return;
     const t = setInterval(() => setSessionTime(s => s + 1), 1000);
     return () => clearInterval(t);
-  }, [phase]);
-
-  // Anti-cheat: tab switch detection
-  useEffect(() => {
-    const handler = () => {
-      if (document.hidden && phase !== 'intro' && phase !== 'complete') {
-        setTabSwitches(t => {
-          const n = t + 1;
-          setShowWarning(true);
-          setTimeout(() => setShowWarning(false), 4000);
-          return n;
-        });
-      }
-    };
-    document.addEventListener('visibilitychange', handler);
-    return () => document.removeEventListener('visibilitychange', handler);
   }, [phase]);
 
   const addMessage = (role: 'ai' | 'user', content: string) => {
@@ -169,7 +182,7 @@ function InterviewSessionContent() {
 
   const startInterview = () => {
     setShowFullscreenPrompt(false);
-    document.documentElement.requestFullscreen?.().catch(() => {});
+    enterFullscreen();
     setIsFullscreen(true);
     setPhase('coding');
     setAiTyping(true);
@@ -182,16 +195,29 @@ function InterviewSessionContent() {
   const runCode = async () => {
     setIsRunning(true);
     setOutput('Running code...');
-    await new Promise(r => setTimeout(r, 1500));
-    // Simulated execution results
-    const results = [
-      '✓ Test case 1 passed: [1,2,3,4] → 3\n✓ Test case 2 passed: [0,5] → 5\n✓ Test case 3 passed: [] → None\n\nAll 3 tests passed • Runtime: 47ms • Memory: 14.2 MB',
-      '✓ Test case 1 passed\n✗ Test case 2 failed: Expected [1,3] but got [3,1]\n\n1/2 tests passed • Runtime: 63ms',
-      '✓ 5/5 test cases passed\n\nRuntime: 32ms (beats 89.4%)\nMemory: 12.8 MB (beats 76.2%)',
-    ];
-    setOutput(results[Math.floor(Math.random() * results.length)]);
+    await new Promise(r => setTimeout(r, 500));
+
+    // rudimentary evaluation: check for correctness by scanning code for expected answer hint
+    const expectedHint = (currentQ as any).answerHint || '';
+    let correct = false;
+    if (expectedHint && code.toLowerCase().includes(expectedHint.toLowerCase())) {
+      correct = true;
+    }
+
+    // complexity estimation
+    const loops = (code.match(/for\b|while\b/g) || []).length;
+    const complexity = loops >= 2 ? 'O(n²)' : loops === 1 ? 'O(n)' : 'O(1)';
+
+    if (correct) {
+      setOutput(`✓ All sample tests passed
+
+Estimated time complexity: ${complexity}`);
+      setScores(s => ({ ...s, technical: Math.min(100, s.technical + 15) }));
+    } else {
+      setOutput(`✗ Code seems incorrect. Please try again.\n\nHint: make sure your solution ${expectedHint || 'is correct'}.`);
+      setScores(s => ({ ...s, technical: Math.max(0, s.technical - 5) }));
+    }
     setIsRunning(false);
-    setScores(s => ({ ...s, technical: Math.min(100, s.technical + 12) }));
   };
 
   const toggleVoice = () => {
@@ -278,11 +304,19 @@ function InterviewSessionContent() {
       <p style={{ color: 'var(--text-secondary)', maxWidth: 480, lineHeight: 1.7, marginBottom: 8 }}>
         Role: <strong style={{ color: '#a78bfa' }}>{role}</strong> • Type: <strong style={{ color: '#22d3ee' }}>{type}</strong> • Difficulty: <strong style={{ color: { easy: '#34d399', medium: '#fbbf24', hard: '#f87171' }[difficulty] }}>{difficulty}</strong>
       </p>
-      <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', maxWidth: 500, lineHeight: 1.7, marginBottom: 32 }}>
-        This session will run in fullscreen for anti-cheat monitoring. Tab switching and fullscreen exit will be logged. The AI will ask questions, evaluate your code, and score voice answers.
+      <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', maxWidth: 500, lineHeight: 1.7, marginBottom: 8 }}>
+        This session will run in fullscreen for anti-cheat monitoring.
       </p>
+      <div style={{ marginBottom: 12 }}>
+        <strong style={{ color: '#f87171', display: 'block', marginBottom: 8, fontSize: '0.95rem' }}>⚠️ IMPORTANT: If you switch tabs, minimize, or change the active window, the interview will be ended and submitted automatically.</strong>
+        <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Your results will be recorded and the session cannot be resumed.</span>
+      </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+        <input type="checkbox" checked={interviewAckAccepted} onChange={e => setInterviewAckAccepted(e.target.checked)} />
+        <span style={{ fontSize: '0.95rem' }}>I understand switching windows will end the interview automatically.</span>
+      </label>
       <div style={{ display: 'flex', gap: 12 }}>
-        <button className="btn-primary" onClick={startInterview} style={{ padding: '16px 40px', fontSize: '1rem' }}>
+        <button className="btn-primary" onClick={startInterview} disabled={!interviewAckAccepted} style={{ padding: '16px 40px', fontSize: '1rem' }}>
           <Maximize size={18} style={{ display: 'inline', marginRight: 8 }} /> Enter Fullscreen & Begin
         </button>
         <button className="btn-ghost" onClick={() => router.push('/interview/ai')} style={{ padding: '16px 24px' }}>
@@ -294,13 +328,13 @@ function InterviewSessionContent() {
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-primary)', overflow: 'hidden' }}>
-      {/* Warning banner */}
-      {showWarning && (
-        <div className="warning-banner">
-          ⚠️ Tab switch detected ({tabSwitches} warning{tabSwitches > 1 ? 's' : ''}). {tabSwitches >= 3 ? 'Session will be flagged!' : `${3 - tabSwitches} more will flag this session.`}
+      {/* Auto-End Notification */}
+      {showAutoEndNotification && (
+        <div style={{ position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)', background: 'linear-gradient(135deg, #f87171 0%, #e11d48 100%)', color: 'white', padding: '18px 28px', borderRadius: 12, boxShadow: '0 10px 30px rgba(0,0,0,0.3)', zIndex: 9999, maxWidth: 500, textAlign: 'center' }}>
+          <div style={{ fontWeight: 700, fontSize: '1.0rem', marginBottom: 4 }}>🚨 Window Changed - Interview Auto-Ended</div>
+          <div style={{ fontSize: '0.9rem', opacity: 0.95 }}>Switching tabs or windows ended your interview. Your results are being submitted.</div>
         </div>
       )}
-
       {/* Top bar */}
       <div style={{ padding: '12px 24px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>

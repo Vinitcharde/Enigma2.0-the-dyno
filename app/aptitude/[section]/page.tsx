@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
+import { useWindowChangeProtection } from '@/lib/useWindowChangeProtection';
 import Sidebar from '@/components/Sidebar';
 import { Clock, CheckCircle, XCircle, AlertTriangle, ChevronRight, ChevronLeft, Flag } from 'lucide-react';
 
@@ -61,12 +62,32 @@ export default function QuizPage() {
   const [submitted, setSubmitted] = useState(false);
   const [started, setStarted] = useState(false);
   const [showExplanation, setShowExplanation] = useState(false);
+  const [showInstructionModal, setShowInstructionModal] = useState(false);
+  const [ackAccepted, setAckAccepted] = useState(false);
+  const [tabSwitches, setTabSwitches] = useState(0);
+  const [showWarning, setShowWarning] = useState(false);
+  const [showAutoSubmitNotification, setShowAutoSubmitNotification] = useState(false);
 
   const titles: Record<string, string> = {
     quantitative: 'Quantitative Aptitude',
     logical: 'Logical Reasoning',
     verbal: 'Verbal Ability',
   };
+
+  // Window change protection - auto-submit on tab switch
+  const { enterFullscreen } = useWindowChangeProtection({
+    enabled: started && !submitted,
+    showWarning: false,  // Disable alerts
+    enableFullscreen: true,
+    onWindowChange: () => {
+      setTabSwitches(t => t + 1);
+      // Show auto-submit notification
+      setShowAutoSubmitNotification(true);
+      // Auto-submit the quiz
+      setTimeout(() => setSubmitted(true), 2000);
+    },
+    warningMessage: 'Quiz auto-submitted due to window change.',
+  });
 
   useEffect(() => {
     if (!started || submitted) return;
@@ -80,6 +101,11 @@ export default function QuizPage() {
   }, [started, submitted]);
 
   const handleSubmit = useCallback(() => setSubmitted(true), []);
+
+  const handleQuizStart = useCallback(() => {
+    enterFullscreen();
+    setStarted(true);
+  }, [enterFullscreen]);
 
   const formatTime = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
@@ -133,12 +159,29 @@ export default function QuizPage() {
               <li>Results shown immediately after submission</li>
             </ul>
           </div>
-          <button className="btn-primary" onClick={() => setStarted(true)} style={{ width: '100%', padding: '16px', fontSize: '1rem' }}>
+          <button className="btn-primary" onClick={() => setShowInstructionModal(true)} style={{ width: '100%', padding: '16px', fontSize: '1rem' }}>
             🚀 Begin Quiz
           </button>
           <button className="btn-ghost" onClick={() => router.push('/aptitude')} style={{ width: '100%', marginTop: 10, padding: '12px', fontSize: '0.9rem' }}>
             Cancel
           </button>
+          {showInstructionModal && (
+            <div className="instruction-modal" style={{ marginTop: 18, background: 'var(--bg-secondary)', border: '1px solid var(--border)', padding: 18, borderRadius: 10 }}>
+              <h3 style={{ marginBottom: 8, fontWeight: 700 }}>Important Instructions</h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', marginBottom: 12 }}>
+                <strong style={{ color: '#f87171', display: 'block', marginBottom: 8 }}>⚠️ IMPORTANT: Switching tabs or changing the active window will automatically submit your quiz immediately.</strong>
+                Please ensure you remain on this screen until you finish. Your answers will be recorded up to the point of submission and the session cannot be resumed.
+              </p>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                <input type="checkbox" checked={ackAccepted} onChange={e => setAckAccepted(e.target.checked)} />
+                <span style={{ fontSize: '0.9rem' }}>I understand that switching windows will auto-submit the quiz.</span>
+              </label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn-primary" disabled={!ackAccepted} onClick={() => { setShowInstructionModal(false); handleQuizStart(); }} style={{ padding: '10px 16px' }}>Start Quiz</button>
+                <button className="btn-ghost" onClick={() => setShowInstructionModal(false)} style={{ padding: '10px 16px' }}>Cancel</button>
+              </div>
+            </div>
+          )}
         </div>
       </main>
     </div>
@@ -222,6 +265,13 @@ export default function QuizPage() {
     <div style={{ display: 'flex' }}>
       <Sidebar />
       <main className="main-content" style={{ padding: '24px 28px' }}>
+        {/* Auto-Submit Notification */}
+        {showAutoSubmitNotification && (
+          <div style={{ position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)', background: 'linear-gradient(135deg, #f87171 0%, #e11d48 100%)', color: 'white', padding: '18px 28px', borderRadius: 12, boxShadow: '0 10px 30px rgba(0,0,0,0.3)', zIndex: 9999, maxWidth: 500, textAlign: 'center' }}>
+            <div style={{ fontWeight: 700, fontSize: '1.0rem', marginBottom: 4 }}>🚨 Window Changed - Quiz Auto-Submitted</div>
+            <div style={{ fontSize: '0.9rem', opacity: 0.95 }}>Your answers have been saved. Switching tabs triggered automatic submission.</div>
+          </div>
+        )}
         {/* Top bar */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, padding: '14px 20px', background: 'var(--bg-card)', borderRadius: 14, border: '1px solid var(--border)' }}>
           <div style={{ fontWeight: 700, color: 'white', fontSize: '0.95rem' }}>{titles[section]}</div>
