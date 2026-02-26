@@ -12,6 +12,7 @@ Your role:
 - Ask probing follow-up questions that test deeper understanding
 - Evaluate verbal explanations for clarity, depth, and accuracy
 - Score candidates fairly on: Technical skill, Problem Solving, Communication, Optimization
+- When resume data is provided, personalize questions to the candidate's experience and skill set
 
 Guidelines:
 - Keep responses concise (2-4 paragraphs max)
@@ -19,7 +20,8 @@ Guidelines:
 - Be specific — reference actual code/concepts the candidate used
 - If code is wrong, explain WHY and give hints, don't just give the answer
 - Adjust difficulty based on candidate performance
-- Be warm and professional — this should feel like a real interview, not a test`;
+- Be warm and professional — this should feel like a real interview, not a test
+- When evaluating voice/verbal responses, assess: clarity, technical accuracy, logical flow, confidence, and depth`;
 
 interface ChatMessage {
     role: 'system' | 'user' | 'assistant';
@@ -52,17 +54,61 @@ async function callSambaNova(messages: ChatMessage[]): Promise<string> {
     return data.choices?.[0]?.message?.content || '';
 }
 
+function buildResumeContext(resumeData: any): string {
+    if (!resumeData) return '';
+
+    let context = '\n\n--- CANDIDATE RESUME CONTEXT ---\n';
+    if (resumeData.name) context += `Name: ${resumeData.name}\n`;
+    if (resumeData.seniorityLevel) context += `Seniority: ${resumeData.seniorityLevel}\n`;
+    if (resumeData.yearsOfExperience) context += `Years of Experience: ${resumeData.yearsOfExperience}\n`;
+
+    if (resumeData.skills?.length > 0) {
+        context += `Skills: ${resumeData.skills.join(', ')}\n`;
+    }
+
+    if (resumeData.skillCategories) {
+        for (const [category, skills] of Object.entries(resumeData.skillCategories)) {
+            if ((skills as string[]).length > 0) {
+                context += `  ${category}: ${(skills as string[]).join(', ')}\n`;
+            }
+        }
+    }
+
+    if (resumeData.experience?.length > 0) {
+        context += `\nExperience:\n`;
+        resumeData.experience.slice(0, 3).forEach((exp: string, i: number) => {
+            context += `  ${i + 1}. ${exp.substring(0, 200)}\n`;
+        });
+    }
+
+    if (resumeData.projects?.length > 0) {
+        context += `\nProjects:\n`;
+        resumeData.projects.slice(0, 3).forEach((proj: string, i: number) => {
+            context += `  ${i + 1}. ${proj.substring(0, 200)}\n`;
+        });
+    }
+
+    if (resumeData.summary) {
+        context += `\nSummary: ${resumeData.summary.substring(0, 300)}\n`;
+    }
+
+    context += '--- END RESUME CONTEXT ---\n';
+    return context;
+}
+
 export async function POST(req: NextRequest) {
     let action = 'evaluate_response';
 
     try {
         const body = await req.json();
         action = body.action || 'evaluate_response';
-        const { role, type, difficulty, question, code, language, userMessage, chatHistory } = body;
+        const { role, type, difficulty, question, code, language, userMessage, chatHistory, resumeData } = body;
+
+        const resumeContext = buildResumeContext(resumeData);
 
         // Build chat history in OpenAI format
         const messages: ChatMessage[] = [
-            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'system', content: SYSTEM_PROMPT + resumeContext },
         ];
 
         // Add conversation history
@@ -78,6 +124,44 @@ export async function POST(req: NextRequest) {
         let prompt = '';
 
         switch (action) {
+            case 'generate_resume_questions': {
+                prompt = `Based on the candidate's resume context provided in the system message, generate a personalized interview for a **${role}** position at **${difficulty}** difficulty.
+
+Generate exactly 3 interview questions:
+1. A **technical/DSA question** related to their strongest skills
+2. A **system design question** related to their projects or experience
+3. A **behavioral question** referencing their specific experience
+
+For each question, provide:
+- The question text (detailed, specific to their resume)
+- The question type (dsa, system_design, or behavioral)
+- A follow-up question
+
+IMPORTANT: Format your response EXACTLY as JSON:
+{
+  "questions": [
+    {
+      "question": "...",
+      "type": "dsa",
+      "followUp": "..."
+    },
+    {
+      "question": "...",
+      "type": "system_design",
+      "followUp": "..."
+    },
+    {
+      "question": "...",
+      "type": "behavioral",
+      "followUp": "..."
+    }
+  ]
+}
+
+Make questions challenging but fair for their experience level (${resumeData?.seniorityLevel || 'Mid-Level'}).`;
+                break;
+            }
+
             case 'analyze_code': {
                 prompt = `You are interviewing for a **${role}** position (${difficulty} difficulty).
 
@@ -110,12 +194,38 @@ The candidate just said:
 "${userMessage}"
 
 Based on the conversation history and this response:
-1. Evaluate the quality of their explanation
+1. Evaluate the quality of their explanation — assess **clarity**, **technical accuracy**, **logical flow**, and **depth**
 2. Note any misconceptions or gaps in understanding
-3. Ask a relevant follow-up question that probes deeper
-4. If this is a behavioral question, evaluate their STAR method usage
+3. If they used good technical vocabulary, acknowledge it
+4. Ask a relevant follow-up question that probes deeper
+5. If this is a behavioral question, evaluate their STAR method usage
 
 Be specific and reference what they actually said. Keep your response concise (2-3 paragraphs).`;
+                break;
+            }
+
+            case 'evaluate_voice_explanation': {
+                prompt = `You are interviewing for a **${role}** position (${difficulty} difficulty).
+
+The current question is: "${question}"
+
+The candidate just gave this VERBAL explanation (transcribed from speech):
+"${userMessage}"
+
+Analyze their verbal explanation across these dimensions:
+1. **Semantic Coherence**: Does their explanation follow a logical flow?
+2. **Technical Depth**: How well do they understand the underlying concepts?
+3. **Vocabulary Usage**: Are they using appropriate technical terminology?
+4. **Confidence Level**: Do they sound certain or hesitant? (presence of filler words, self-corrections)
+5. **Communication Clarity**: Is their explanation clear enough for a team member to understand?
+
+Provide specific feedback on HOW they communicated, not just WHAT they said.
+Then ask a targeted follow-up based on any gaps you noticed.
+
+IMPORTANT: Include a voice score at the end in this format:
+VOICE_SCORES:clarity=XX,depth=XX,vocabulary=XX,confidence=XX,flow=XX
+
+Each score should be 0-100.`;
                 break;
             }
 
@@ -140,21 +250,25 @@ Keep response concise (1-2 paragraphs).`;
             case 'final_evaluation': {
                 prompt = `You are completing a **${role}** interview (${difficulty} difficulty, ${type} type).
 
-Based on the entire conversation history, provide a final evaluation:
+Based on the entire conversation history, provide a comprehensive final evaluation:
 
-1. **Overall Assessment** (1-2 sentences)
-2. **Strengths** (2-3 specific things the candidate did well)
-3. **Areas for Improvement** (2-3 specific areas to work on)
-4. **Score Breakdown** (provide realistic scores 0-100 for each):
+1. **Overall Assessment** (2-3 sentences)
+2. **Strengths** (3-4 specific things the candidate did well, referencing actual moments)
+3. **Areas for Improvement** (3-4 specific areas to work on with actionable advice)
+4. **Voice & Communication Analysis**: How was their verbal communication? Were they clear, confident, structured?
+5. **Resume Alignment**: How well did their performance match their resume skills?
+6. **Score Breakdown** (provide realistic scores 0-100 for each):
    - Technical: (code quality, correctness, algorithm knowledge)
    - Problem Solving: (approach, decomposition, edge case handling)
-   - Communication: (clarity, explanation quality, structure)
+   - Communication: (clarity, explanation quality, structure, voice fluency)
    - Optimization: (complexity awareness, performance considerations)
+   - Resume Relevance: (how well they demonstrated claimed skills)
 
 IMPORTANT: You MUST include this exact format somewhere in your response:
-SCORES:technical=XX,problemSolving=XX,communication=XX,optimization=XX
+SCORES:technical=XX,problemSolving=XX,communication=XX,optimization=XX,resumeRelevance=XX
 
-5. **Recommendation**: Hire / Maybe / Needs Practice
+7. **Recommendation**: Strong Hire / Hire / Maybe / Needs Practice
+8. **Personalized Study Plan**: 3-5 specific topics they should study
 
 Be fair and realistic with scores. Don't inflate them.`;
                 break;
@@ -170,21 +284,56 @@ Be fair and realistic with scores. Don't inflate them.`;
         // Call SambaNova API
         const aiResponse = await callSambaNova(messages);
 
-        // Extract scores if present in final evaluation
+        // Extract scores if present
         let scores = null;
-        const scoreMatch = aiResponse.match(/SCORES:technical=(\d+),problemSolving=(\d+),communication=(\d+),optimization=(\d+)/);
+        const scoreMatch = aiResponse.match(/SCORES:technical=(\d+),problemSolving=(\d+),communication=(\d+),optimization=(\d+)(?:,resumeRelevance=(\d+))?/);
         if (scoreMatch) {
             scores = {
                 technical: parseInt(scoreMatch[1]),
                 problemSolving: parseInt(scoreMatch[2]),
                 communication: parseInt(scoreMatch[3]),
                 optimization: parseInt(scoreMatch[4]),
+                resumeRelevance: scoreMatch[5] ? parseInt(scoreMatch[5]) : 75,
             };
         }
 
+        // Extract voice scores if present
+        let voiceScores = null;
+        const voiceMatch = aiResponse.match(/VOICE_SCORES:clarity=(\d+),depth=(\d+),vocabulary=(\d+),confidence=(\d+),flow=(\d+)/);
+        if (voiceMatch) {
+            voiceScores = {
+                clarity: parseInt(voiceMatch[1]),
+                depth: parseInt(voiceMatch[2]),
+                vocabulary: parseInt(voiceMatch[3]),
+                confidence: parseInt(voiceMatch[4]),
+                flow: parseInt(voiceMatch[5]),
+            };
+        }
+
+        // Try to parse questions if generate_resume_questions action
+        let questions = null;
+        if (action === 'generate_resume_questions') {
+            try {
+                const jsonMatch = aiResponse.match(/\{[\s\S]*"questions"[\s\S]*\}/);
+                if (jsonMatch) {
+                    questions = JSON.parse(jsonMatch[0]).questions;
+                }
+            } catch {
+                // If JSON parsing fails, that's ok — we'll use fallback
+            }
+        }
+
+        // Clean response text
+        let cleanResponse = aiResponse
+            .replace(/SCORES:technical=\d+,problemSolving=\d+,communication=\d+,optimization=\d+(?:,resumeRelevance=\d+)?/, '')
+            .replace(/VOICE_SCORES:clarity=\d+,depth=\d+,vocabulary=\d+,confidence=\d+,flow=\d+/, '')
+            .trim();
+
         return NextResponse.json({
-            response: aiResponse.replace(/SCORES:technical=\d+,problemSolving=\d+,communication=\d+,optimization=\d+/, '').trim(),
+            response: cleanResponse,
             scores,
+            voiceScores,
+            questions,
         });
 
     } catch (error: any) {
@@ -192,15 +341,17 @@ Be fair and realistic with scores. Don't inflate them.`;
 
         // Provide smart fallback responses based on action
         const fallbackResponses: Record<string, string> = {
+            generate_resume_questions: '',
             analyze_code: "I've reviewed your code submission. Let me share my analysis:\n\n**What's good:** Your code structure shows a systematic approach to the problem. The logic flow is clear and follows good practices.\n\n**Suggestions:** Consider edge cases such as empty inputs, null values, and boundary conditions. Think about the time complexity of your solution — could you optimize any nested loops?\n\n**Code Quality:** Good variable naming and readability. Consider adding brief comments for complex logic blocks.\n\nNow, please explain your approach verbally — walk me through why you chose this algorithm and analyze its time/space complexity.",
             evaluate_response: "That's a thoughtful explanation! You've covered several key points well.\n\n**What I liked:** Your ability to articulate your thought process clearly shows strong communication skills.\n\n**Follow-up:** Can you think of an alternative approach that might be more efficient? What trade-offs would that involve in terms of time vs space complexity?",
+            evaluate_voice_explanation: "Good verbal explanation! You communicated the core concepts clearly.\n\n**Strengths:** You maintained a logical flow and used appropriate technical terminology.\n\n**Areas to improve:** Try to be more specific about complexity analysis and edge cases when explaining your approach.\n\nCan you elaborate on the time complexity of your solution and how it would perform with very large inputs?",
             generate_followup: "Good thinking! You've demonstrated a solid understanding of the core concepts and trade-offs involved.\n\nI appreciate how you considered multiple approaches. Let's move on to the next part of the interview.",
-            final_evaluation: "🎉 **Interview Complete!**\n\n**Overall Assessment:** You showed a methodical approach to problem-solving and communicated your ideas clearly.\n\n**Strengths:**\n• Clear communication and structured explanations\n• Good problem decomposition approach\n• Willingness to consider multiple solutions\n\n**Areas to Improve:**\n• Edge case handling and boundary conditions\n• Time/space complexity analysis depth\n• Code optimization awareness\n\nOverall, a solid performance! Keep practicing and you'll continue to improve.",
+            final_evaluation: "🎉 **Interview Complete!**\n\n**Overall Assessment:** You showed a methodical approach to problem-solving and communicated your ideas clearly.\n\n**Strengths:**\n• Clear communication and structured explanations\n• Good problem decomposition approach\n• Willingness to consider multiple solutions\n\n**Areas to Improve:**\n• Edge case handling and boundary conditions\n• Time/space complexity analysis depth\n• Code optimization awareness\n\n**Recommendation:** Keep practicing with more challenging problems. Overall, a solid performance!",
         };
 
         return NextResponse.json({
             response: fallbackResponses[action] || fallbackResponses.evaluate_response,
-            scores: action === 'final_evaluation' ? { technical: 72, problemSolving: 68, communication: 75, optimization: 65 } : null,
+            scores: action === 'final_evaluation' ? { technical: 72, problemSolving: 68, communication: 75, optimization: 65, resumeRelevance: 70 } : null,
             fallback: true,
         });
     }

@@ -4,6 +4,24 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 
 export type UserRole = 'student' | 'expert' | 'admin';
 
+export interface ResumeData {
+  skills: string[];
+  skillCategories: Record<string, string[]>;
+  experience: string[];
+  projects: string[];
+  education: string[];
+  certifications: string[];
+  achievements: string[];
+  summary: string;
+  yearsOfExperience: number;
+  seniorityLevel: string;
+  suggestedRoles: string[];
+  rawText: string;
+  name: string;
+  email: string;
+  phone: string;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -20,6 +38,8 @@ export interface User {
   bio?: string;
   linkedin?: string;
   github?: string;
+  resumeData?: ResumeData;
+  resumeFileName?: string;
 }
 
 interface AuthContextType {
@@ -83,7 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const stored = localStorage.getItem('placeai_user');
     if (stored) {
-      try { setUser(JSON.parse(stored)); } catch {}
+      try { setUser(JSON.parse(stored)); } catch { }
     }
     setIsLoading(false);
   }, []);

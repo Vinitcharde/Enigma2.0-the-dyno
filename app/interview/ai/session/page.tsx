@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, Suspense } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { useWindowChangeProtection } from '@/lib/useWindowChangeProtection';
@@ -27,49 +27,250 @@ type Message = { role: 'ai' | 'user'; content: string; timestamp: Date };
 // extend question type with optional hint for auto grader
 interface Question { question: string; type: 'dsa' | 'system_design' | 'behavioral'; followUp: string; answerHint?: string; }
 
-const AI_QUESTIONS: Record<string, Record<string, { question: string; type: 'dsa' | 'system_design' | 'behavioral'; followUp: string }[]>> = {
+// Utility: shuffle array and pick N items (Fisher-Yates)
+function shufflePick<T>(arr: T[], n: number): T[] {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy.slice(0, n);
+}
+
+type QData = { question: string; type: 'dsa' | 'system_design' | 'behavioral'; followUp: string; answerHint?: string };
+
+const AI_QUESTIONS: Record<string, Record<string, QData[]>> = {
   'Full Stack Developer': {
     full: [
-      { question: 'Design a URL shortener like bit.ly. Implement the core shortening and redirection logic. Consider: What data structure would you use? How would you handle collisions? Implement the encode and decode functions.', type: 'dsa', followUp: 'Your solution looks good! Now tell me — how would you scale this to handle 1 million requests per second? What caching strategy would you use?' },
-      { question: 'Design the system architecture for a real-time collaborative document editor like Google Docs. Draw out the components, data flow, and describe the conflict resolution strategy (OT or CRDT).', type: 'system_design', followUp: 'Excellent! Now, if network partition occurs, how does your system handle consistency? Would you choose AP or CP in CAP theorem and why?' },
-      { question: 'Tell me about a challenging technical problem you solved. Walk me through it using the STAR method — what was the Situation, your Task, the Actions you took, and the Result?', type: 'behavioral', followUp: 'That\'s a solid example. How would you handle it differently if you had to do it again? What did you learn from this experience?' },
+      { question: 'Design a URL shortener like bit.ly. Implement the core shortening and redirection logic. How would you handle collisions? Implement encode/decode functions.', type: 'dsa', followUp: 'How would you scale this to handle 1M requests/sec? What caching strategy?', answerHint: 'hash' },
+      { question: 'Design a real-time collaborative document editor like Google Docs. Describe the system architecture, data flow, and conflict resolution strategy (OT or CRDT).', type: 'system_design', followUp: 'If network partition occurs, would you choose AP or CP in CAP theorem and why?' },
+      { question: 'Tell me about a challenging full-stack technical problem you solved using the STAR method.', type: 'behavioral', followUp: 'How would you handle it differently if you had to do it again?' },
+      { question: 'Implement a full-stack authentication system with JWT tokens, refresh tokens, and role-based access control. Show both frontend and backend logic.', type: 'dsa', followUp: 'How do you handle token theft? Explain token rotation and blacklisting strategies.', answerHint: 'jwt auth' },
+      { question: 'Design a real-time chat application like WhatsApp Web. Cover WebSocket management, message persistence, read receipts, and typing indicators at scale.', type: 'system_design', followUp: 'How would you ensure message ordering and exactly-once delivery across multiple devices?' },
+      { question: 'Tell me about a time you had to choose between different tech stacks for a project. What factors influenced your decision?', type: 'behavioral', followUp: 'Have you ever regretted a technology choice? What did you learn from it?' },
+      { question: 'Build a pagination system that supports cursor-based, offset-based, and relay-style pagination. Implement the API and client-side logic. Compare trade-offs.', type: 'dsa', followUp: 'When would cursor-based pagination break down? How do you handle deleted records?', answerHint: 'pagination' },
+      { question: 'Design a multi-tenant SaaS application architecture. Cover data isolation strategies, tenant-specific customization, billing integration, and performance optimization.', type: 'system_design', followUp: 'How do you handle noisy neighbor problems? What isolation level do you recommend and why?' },
+      { question: 'Describe a production incident where your full-stack knowledge helped identify the root cause faster than a specialist would have.', type: 'behavioral', followUp: 'How do you keep up with both frontend and backend technologies? What is your learning strategy?' },
     ],
     dsa: [
-      { question: 'Given a linked list with a cycle, find the starting node of the cycle. Write an efficient O(n) time, O(1) space solution. Explain your approach before coding.', type: 'dsa', followUp: 'Well done! Can you explain why Floyd\'s algorithm works mathematically? What is the proof behind it?' },
-      { question: 'Implement a LRU (Least Recently Used) Cache with get() and put() operations both in O(1) time. Explain your data structure choice.', type: 'dsa', followUp: 'Great implementation! Now how would you extend this to an LFU (Least Frequently Used) cache? What additional data structure is needed?' },
+      { question: 'Find the starting node of a cycle in a linked list. Write an O(n) time, O(1) space solution. Explain before coding.', type: 'dsa', followUp: 'Explain why Floyd\'s algorithm works mathematically.', answerHint: 'floyd' },
+      { question: 'Implement an LRU Cache with get() and put() in O(1) time. Explain your data structure choice.', type: 'dsa', followUp: 'How would you extend this to an LFU cache?', answerHint: 'lru' },
+      { question: 'Given a matrix of 0s and 1s, find the largest rectangle containing only 1s. Optimize for time complexity.', type: 'dsa', followUp: 'Can you solve this using a histogram approach? What is the time complexity?', answerHint: 'maximal rectangle' },
+      { question: 'Implement a Trie with insert, search, startsWith, and autoComplete(prefix, limit) methods. Handle case-insensitive search.', type: 'dsa', followUp: 'How would you compress the Trie for memory efficiency? What is a Patricia Trie?', answerHint: 'trie' },
+      { question: 'Given an unsorted array, find the length of the longest consecutive sequence in O(n) time. Explain your approach clearly.', type: 'dsa', followUp: 'How would you solve this if the data was too large to fit in memory (distributed)?', answerHint: 'consecutive sequence' },
+      { question: 'Implement merge sort and quick sort. Compare their time/space complexity, stability, and when you\'d choose one over the other.', type: 'dsa', followUp: 'What is the worst case of quicksort? How does randomized pivot selection help?', answerHint: 'sorting' },
+      { question: 'Design a data structure that supports insert, delete, getRandom — all in O(1) average time.', type: 'dsa', followUp: 'How would you handle duplicates? What changes are needed?', answerHint: 'randomized set' },
+      { question: 'Implement Dijkstra\'s shortest path algorithm. Handle negative edges appropriately and explain when to use Bellman-Ford instead.', type: 'dsa', followUp: 'What about finding all-pairs shortest path? When would you use Floyd-Warshall?', answerHint: 'dijkstra' },
     ],
     behavioral: [
-      { question: 'Describe a time when you had to deal with a difficult team member or conflict in a project. How did you handle it, and what was the outcome?', type: 'behavioral', followUp: 'That shows great emotional intelligence. Have you ever had to escalate such issues to management? What factors influence that decision?' },
+      { question: 'Describe a conflict with a team member on a project. How did you handle it?', type: 'behavioral', followUp: 'Have you ever had to escalate issues to management? What factors influence that decision?' },
+      { question: 'Tell me about a time you had to ship a feature under a tight deadline. How did you prioritize?', type: 'behavioral', followUp: 'Would you have made different trade-offs with more time?' },
+      { question: 'Describe a time you introduced a new tool or process to your team. How did you get buy-in?', type: 'behavioral', followUp: 'What do you do when team members resist change?' },
+      { question: 'Tell me about a project that failed. What went wrong and what did you learn?', type: 'behavioral', followUp: 'How has this failure shaped your approach to future projects?' },
     ],
   },
-  'Data Scientist': {
+
+  'Backend Engineer': {
     full: [
-      { question: 'You have a highly imbalanced dataset (99% negative, 1% positive). How would you approach building a binary classifier? What evaluation metrics would you use, and why is accuracy misleading here?', type: 'dsa', followUp: 'Good answer! Now, between SMOTE oversampling and class_weight adjustment — when would you prefer each approach and why?' },
-      { question: 'Design a recommendation system for an e-commerce platform. Compare collaborative filtering vs content-based vs hybrid approaches. Which would you implement and how?', type: 'system_design', followUp: 'Excellent design! How would you handle the cold-start problem for new users and new items? Walk me through your strategy.' },
-      { question: 'Walk me through your most impactful data science project. What was the business impact, and how did you measure success?', type: 'behavioral', followUp: 'Impressive! If you could redo that project, what would you do differently? Any lessons learned?' },
+      { question: 'Implement a rate limiter supporting fixed-window and sliding-window. It should work in a distributed environment with multiple servers.', type: 'dsa', followUp: 'How would you handle sync across server instances? Redis vs lock-free approach?', answerHint: 'rate limit' },
+      { question: 'Design a scalable message queue like Kafka. Cover message ordering, consumer groups, dead-letter queues, exactly-once delivery, and horizontal scaling.', type: 'system_design', followUp: 'What happens when a consumer crashes mid-processing? Explain your acknowledgment strategy.' },
+      { question: 'Tell me about debugging a critical production issue under pressure. Root cause, investigation, and prevention.', type: 'behavioral', followUp: 'What monitoring would you set up proactively to catch such issues earlier?' },
+      { question: 'Implement a connection pool with acquire (with timeout), release, health checking, and auto-scaling. Discuss concurrency control.', type: 'dsa', followUp: 'How do you handle connection leaks? Queue or reject when exhausted?', answerHint: 'pool' },
+      { question: 'Design an API gateway that handles: authentication, rate limiting, request routing, load balancing, circuit breaking, and request/response transformation.', type: 'system_design', followUp: 'How do you handle cascading failures? Explain the circuit breaker pattern in detail.' },
+      { question: 'Tell me about a time you optimized a slow database query. What tools did you use, and what was the improvement?', type: 'behavioral', followUp: 'How do you decide between caching, query optimization, and schema changes?' },
+      { question: 'Implement a distributed lock using Redis. Handle lock expiry, renewal, and the fencing token pattern for correctness. Explain the Redlock algorithm.', type: 'dsa', followUp: 'What are the criticisms of Redlock? When would you use Zookeeper instead?', answerHint: 'distributed lock' },
+      { question: 'Design an event-sourcing architecture for a banking system. Cover event store, projections, snapshots, and eventual consistency. Compare with CRUD.', type: 'system_design', followUp: 'How do you handle schema evolution in event sourcing? What about event versioning?' },
+      { question: 'Implement a consistent hashing ring with virtual nodes. Demonstrate how it minimizes key redistribution when servers are added/removed.', type: 'dsa', followUp: 'How does virtual node count affect load balancing? What\'s the memory trade-off?', answerHint: 'consistent hash' },
     ],
     dsa: [
-      { question: 'Implement K-Means clustering from scratch in Python. Handle the centroid initialization (k-means++), assignment step, and update step. How do you determine the optimal K?', type: 'dsa', followUp: 'Good implementation! What are the limitations of K-Means? When would you choose DBSCAN over K-Means?' },
+      { question: 'Implement a thread-safe producer-consumer queue using only mutexes and condition variables. Handle graceful shutdown.', type: 'dsa', followUp: 'How does this compare to a lock-free queue? When would you use each?', answerHint: 'producer consumer' },
+      { question: 'Build a scheduler that executes tasks at a specific time. Support: one-time tasks, recurring tasks (cron-like), cancellation, and persistence.', type: 'dsa', followUp: 'How would you make this distributed? Handle leader election for task execution.', answerHint: 'scheduler' },
+      { question: 'Implement a database connection retry mechanism with exponential backoff, jitter, and circuit breaker pattern.', type: 'dsa', followUp: 'How do you determine appropriate initial delay, max retries, and backoff multiplier?', answerHint: 'retry backoff' },
+      { question: 'Design and implement a simple in-memory key-value store with TTL support, LRU eviction, and snapshot persistence.', type: 'dsa', followUp: 'How would you add replication? Compare master-slave vs multi-master approaches.', answerHint: 'key value store' },
+      { question: 'Implement a write-ahead log (WAL) for crash recovery. Handle log compaction, checkpointing, and recovery procedure.', type: 'dsa', followUp: 'How do databases like PostgreSQL use WAL? What is the difference between logical and physical replication?', answerHint: 'wal' },
+      { question: 'Build an in-memory search index supporting full-text search with inverted indices. Handle tokenization, stemming, and relevance scoring (TF-IDF).', type: 'dsa', followUp: 'How would you add fuzzy search? What about real-time index updates?', answerHint: 'inverted index' },
     ],
     behavioral: [
-      { question: 'Describe a situation where your data analysis led to a surprising or counterintuitive finding. How did you validate it and communicate it to stakeholders?', type: 'behavioral', followUp: 'That\'s a great approach. How do you balance statistical rigor with business pragmatism when presenting findings?' },
+      { question: 'Describe a situation where you had to choose between technical debt and shipping a feature. What did you decide and why?', type: 'behavioral', followUp: 'How do you quantify technical debt and convince stakeholders to allocate time for it?' },
+      { question: 'Tell me about building or migrating a system to microservices. What were the challenges?', type: 'behavioral', followUp: 'What signs tell you a monolith should be broken up? When should you NOT use microservices?' },
+      { question: 'Describe a time when you had to onboard a new team member onto a complex backend system. How did you approach it?', type: 'behavioral', followUp: 'What documentation practices do you follow to keep systems understandable?' },
+    ],
+  },
+
+  'Frontend Developer': {
+    full: [
+      { question: 'Implement a virtual scroll component that efficiently renders 100,000+ items. Only render visible viewport items with scroll position tracking.', type: 'dsa', followUp: 'How would you handle variable-height items? Accessibility and keyboard navigation?', answerHint: 'virtual scroll' },
+      { question: 'Design frontend architecture for a large-scale e-commerce platform. Cover state management, component architecture, code splitting, SSR vs CSR, and micro-frontends.', type: 'system_design', followUp: 'How would you measure and optimize Core Web Vitals? Target Lighthouse score above 90.' },
+      { question: 'Tell me about a time you improved UX significantly. What research did you do and how did you measure impact?', type: 'behavioral', followUp: 'How do you balance developer experience with user experience?' },
+      { question: 'Implement a custom DOM diffing algorithm. Given two virtual DOM trees, find the minimal set of operations to transform one into the other.', type: 'dsa', followUp: 'How does React\'s reconciliation differ? What role do keys play?', answerHint: 'dom diff' },
+      { question: 'Design an accessible, theme-able design system from scratch. Cover component API design, tokens, variants, compound components, and documentation.', type: 'system_design', followUp: 'How do you ensure WCAG 2.1 AA compliance? How do you test accessibility at scale?' },
+      { question: 'Tell me about debugging a tricky CSS or rendering issue. How did you identify and fix it?', type: 'behavioral', followUp: 'What CSS methodology do you prefer and why? BEM vs CSS-in-JS vs utility-first?' },
+      { question: 'Build a drag-and-drop Kanban board from scratch (no libraries). Handle: cross-column moves, reordering within columns, touch support, and keyboard accessibility.', type: 'dsa', followUp: 'How would you add undo/redo? What about real-time collaboration on the same board?', answerHint: 'drag drop' },
+      { question: 'Design a frontend monitoring and logging system. Cover: error boundaries, performance monitoring, user session replay, and analytics event tracking.', type: 'system_design', followUp: 'How do you balance data collection with user privacy? How do you handle PII in error logs?' },
+      { question: 'Implement a form builder that supports: dynamic field types, conditional logic, validation rules, nested repeatable sections, and auto-save.', type: 'dsa', followUp: 'How would you serialize the form schema? How do you handle complex cross-field validation?', answerHint: 'form builder' },
+    ],
+    dsa: [
+      { question: 'Build a debounce and throttle function with: leading/trailing edge options, cancel, flush, and max wait. Write tests.', type: 'dsa', followUp: 'When would you choose debounce vs throttle in production?', answerHint: 'debounce' },
+      { question: 'Implement Promise.all, Promise.race, Promise.allSettled, and Promise.any from scratch. Handle all edge cases.', type: 'dsa', followUp: 'What happens with infinite iterables? How does microtask queue relate to promises?', answerHint: 'promise' },
+      { question: 'Build a reactive state management system (mini-Redux/Zustand). Support: subscriptions, selectors, middleware, computed values, and devtools.', type: 'dsa', followUp: 'Compare flux pattern vs observable pattern. When would you use one over the other?', answerHint: 'state management' },
+      { question: 'Implement a custom hooks library with: useDebounce, useThrottle, useIntersectionObserver, useMediaQuery, and useLocalStorage.', type: 'dsa', followUp: 'How do you test custom hooks? What about server-side rendering compatibility?', answerHint: 'custom hooks' },
+      { question: 'Create an image lazy-loading system using IntersectionObserver. Support: blur-up placeholders, progressive loading, error fallbacks, and responsive images (srcset).', type: 'dsa', followUp: 'How do you handle images above the fold? What about layout shift prevention?', answerHint: 'lazy loading' },
+    ],
+    behavioral: [
+      { question: 'Describe a challenging cross-browser or responsive design issue. How did you debug and solve it?', type: 'behavioral', followUp: 'How do you ensure a11y? What tools and standards do you follow?' },
+      { question: 'Tell me about a time you refactored a large legacy frontend codebase. How did you plan and execute it?', type: 'behavioral', followUp: 'How do you ensure no regressions during a refactor? What testing strategy do you use?' },
+      { question: 'Describe a time when designer requirements seemed technically infeasible. How did you handle it?', type: 'behavioral', followUp: 'How do you collaborate effectively with designers? What tools help bridge the gap?' },
+    ],
+  },
+
+  'Data Scientist': {
+    full: [
+      { question: 'You have a highly imbalanced dataset (99% negative, 1% positive). Build a binary classifier. Why is accuracy misleading? Write code.', type: 'dsa', followUp: 'Between SMOTE and class_weight — when would you prefer each?', answerHint: 'imbalanced' },
+      { question: 'Design a recommendation system for e-commerce. Compare collaborative filtering vs content-based vs hybrid. Include data pipeline and A/B testing.', type: 'system_design', followUp: 'How would you handle the cold-start problem for new users and items?' },
+      { question: 'Walk me through your most impactful data science project. Business problem, ML framing, and success measurement.', type: 'behavioral', followUp: 'What would you do differently? Lessons on stakeholder communication?' },
+      { question: 'Implement a complete decision tree classifier from scratch. Handle: information gain (Gini/entropy), pruning strategies, and categorical features.', type: 'dsa', followUp: 'How does Random Forest improve on single decision trees? What about gradient boosting?', answerHint: 'decision tree' },
+      { question: 'Design an A/B testing platform. Cover: experiment design, statistical significance calculation, sample size estimation, and guardrail metrics.', type: 'system_design', followUp: 'How do you handle multiple comparisons (Bonferroni correction)? When would you use Bayesian A/B testing instead?' },
+      { question: 'Tell me about a time your analysis contradicted stakeholder expectations. How did you handle it?', type: 'behavioral', followUp: 'How do you distinguish between genuine insights and data artifacts?' },
+      { question: 'Build a feature engineering pipeline for a credit scoring model. Handle: missing data imputation, feature selection, multicollinearity, and temporal features.', type: 'dsa', followUp: 'How do you handle data leakage? What is target encoding and when is it dangerous?', answerHint: 'feature engineering' },
+      { question: 'Design a fraud detection system with real-time scoring. Cover data pipeline, feature store, model training, serving, monitoring, and feedback loops.', type: 'system_design', followUp: 'How do you handle concept drift? What about adversarial attacks on your model?' },
+      { question: 'Implement linear regression from scratch with gradient descent. Add L1/L2 regularization. Visualize the loss curve.', type: 'dsa', followUp: 'When would you use L1 vs L2? What is Elastic Net? When would you use each?', answerHint: 'linear regression' },
+    ],
+    dsa: [
+      { question: 'Implement K-Means clustering from scratch with k-means++ initialization. Include the elbow method for optimal K.', type: 'dsa', followUp: 'Limitations of K-Means? When use DBSCAN or GMM?', answerHint: 'kmeans' },
+      { question: 'Implement a Naive Bayes text classifier with Laplace smoothing and TF-IDF. Train on spam detection.', type: 'dsa', followUp: 'What assumptions does Naive Bayes make? When do they break?', answerHint: 'naive bayes' },
+      { question: 'Build a complete PCA implementation from scratch using eigendecomposition. Explain variance explained ratio and scree plot.', type: 'dsa', followUp: 'When would you use t-SNE or UMAP instead? What are their trade-offs?', answerHint: 'pca' },
+      { question: 'Implement cross-validation (k-fold, stratified k-fold, time series split) from scratch. Explain why each variant exists.', type: 'dsa', followUp: 'When is leave-one-out appropriate? How do you handle grouped data?', answerHint: 'cross validation' },
+      { question: 'Implement a simple gradient boosting classifier from scratch. Start with decision stumps and show how residuals are used for boosting.', type: 'dsa', followUp: 'Compare XGBoost, LightGBM, and CatBoost. When would you choose each?', answerHint: 'gradient boosting' },
+    ],
+    behavioral: [
+      { question: 'Describe a situation where data analysis led to a counterintuitive finding. How did you validate it?', type: 'behavioral', followUp: 'How do you balance statistical rigor with business pragmatism?' },
+      { question: 'Tell me about a time you had to explain a complex ML concept to a non-technical audience.', type: 'behavioral', followUp: 'What visualization techniques do you use to make data stories compelling?' },
+      { question: 'Describe a time you had to deal with poor quality data. What steps did you take to clean and validate it?', type: 'behavioral', followUp: 'How do you build trust in data quality across an organization?' },
+    ],
+  },
+
+  'ML Engineer': {
+    full: [
+      { question: 'Implement a simple neural network (MLP) from scratch — forward propagation, backpropagation, ReLU/sigmoid activations. Train on XOR.', type: 'dsa', followUp: 'Explain vanishing/exploding gradients. How do batch norm, skip connections, and gradient clipping help?', answerHint: 'neural network' },
+      { question: 'Design an end-to-end ML pipeline for production fraud detection: data ingestion, feature store, training, serving, monitoring, drift detection, retraining.', type: 'system_design', followUp: 'How do you handle concept drift? When trigger automatic retraining vs manual review?' },
+      { question: 'Tell me about optimizing an ML model for production. Constraints (latency, memory, accuracy) and techniques (quantization, distillation, pruning).', type: 'behavioral', followUp: 'How do you decide when a model is "good enough" to deploy?' },
+      { question: 'Implement a complete Transformer attention mechanism from scratch — scaled dot-product attention, multi-head attention, and positional encoding.', type: 'dsa', followUp: 'Why is scaling factor 1/√d_k important? How does multi-head differ from single attention with same total dims?', answerHint: 'transformer' },
+      { question: 'Design an ML model serving infrastructure that supports: A/B testing, shadow deployments, feature stores, model versioning, and rollback capabilities.', type: 'system_design', followUp: 'How do you handle model latency SLAs? When would you use batch vs real-time inference?' },
+      { question: 'Describe a time when a model performed differently in production than in testing. Root cause and fix.', type: 'behavioral', followUp: 'What monitoring do you follow to prevent training-serving skew?' },
+      { question: 'Implement a CNN from scratch for image classification. Include: convolutional layer, pooling, flattening, and backpropagation through conv layers.', type: 'dsa', followUp: 'Explain transfer learning. When would you freeze layers vs fine-tune the entire network?', answerHint: 'cnn' },
+      { question: 'Design a real-time personalization engine using embeddings. Cover: user/item embedding generation, approximate nearest neighbor search, and online learning.', type: 'system_design', followUp: 'How do you handle embedding drift? What is the impact of embedding dimension on performance?' },
+      { question: 'Implement gradient descent optimization: SGD, Mini-batch, Momentum, and Adam. Compare convergence on linear regression.', type: 'dsa', followUp: 'Why does Adam outperform vanilla SGD? When might SGD with momentum be preferred?', answerHint: 'optimizer' },
+    ],
+    dsa: [
+      { question: 'Implement an LSTM cell from scratch. Show the forget gate, input gate, output gate, and cell state update equations. Train on a simple sequence prediction.', type: 'dsa', followUp: 'How does GRU simplify LSTM? When would you use each? What about Transformers vs RNNs?', answerHint: 'lstm' },
+      { question: 'Build a word2vec implementation (skip-gram with negative sampling). Train on a small corpus and visualize embeddings.', type: 'dsa', followUp: 'How do contextual embeddings (BERT) differ from static embeddings (word2vec)? What are the trade-offs?', answerHint: 'word2vec' },
+      { question: 'Implement a variational autoencoder (VAE) from scratch. Show the encoder, decoder, reparameterization trick, and ELBO loss.', type: 'dsa', followUp: 'How does a VAE differ from a standard autoencoder? When would you use a GAN instead?', answerHint: 'vae' },
+      { question: 'Implement beam search for sequence generation. Handle: variable beam width, length normalization, and end-of-sequence tokens.', type: 'dsa', followUp: 'Compare greedy search, beam search, and top-k/top-p sampling. When is each appropriate?', answerHint: 'beam search' },
+      { question: 'Build a simple reinforcement learning agent (Q-learning) that learns to navigate a grid world. Implement epsilon-greedy exploration.', type: 'dsa', followUp: 'How does Deep Q-Network (DQN) extend tabular Q-learning? What is experience replay?', answerHint: 'q learning' },
+    ],
+    behavioral: [
+      { question: 'Tell me about a time you had to choose between model accuracy and inference speed. What was the context?', type: 'behavioral', followUp: 'How do you communicate trade-offs to product teams that want "the best model"?' },
+      { question: 'Describe an experience with data labeling challenges. Quality control, scaling, or ambiguity in labels.', type: 'behavioral', followUp: 'What strategies do you use for semi-supervised or self-supervised learning to reduce labeling needs?' },
+      { question: 'Tell me about a time you had to reproduce results from a research paper and it didn\'t work as expected.', type: 'behavioral', followUp: 'What is your approach to reading and implementing research papers?' },
+    ],
+  },
+
+  'DevOps Engineer': {
+    full: [
+      { question: 'Write a CI/CD pipeline config with: Docker build, unit/integration tests, security scanning, staging deploy with E2E tests, and production canary rollout.', type: 'dsa', followUp: 'How do you handle database migrations in CI/CD? Rollback strategy for canary failures?', answerHint: 'cicd pipeline' },
+      { question: 'Design infrastructure for a globally distributed app serving 10M+ users. Cover: multi-region, load balancing, CDN, DB replication, DR (RPO/RTO), auto-scaling.', type: 'system_design', followUp: 'How do you handle full region failover? Data consistency across regions?' },
+      { question: 'Tell me about the most challenging production outage. Root cause, investigation, prevention.', type: 'behavioral', followUp: 'How do you structure post-mortems? Philosophy on blameless culture?' },
+      { question: 'Write a Dockerfile for multi-stage build of a Node.js app. Optimize for: image size, security, caching, health checks. Add docker-compose with app, DB, Redis.', type: 'dsa', followUp: 'How would you transition this to Kubernetes? Write basic Deployment, Service, Ingress.', answerHint: 'docker' },
+      { question: 'Design a zero-downtime deployment strategy. Compare: blue-green, canary, rolling update, and feature flags. When would you use each?', type: 'system_design', followUp: 'How do you handle database schema changes during zero-downtime deploys? Explain expand-contract pattern.' },
+      { question: 'Tell me about implementing or improving monitoring and observability. Tools used and team impact.', type: 'behavioral', followUp: 'How do you decide between logs, metrics, and traces for debugging?' },
+      { question: 'Write Terraform/IaC to provision: VPC with subnets, auto-scaling group, ALB, RDS with read replicas, Redis. Include security groups.', type: 'dsa', followUp: 'How do you handle state management? Strategy for secrets and sensitive variables?', answerHint: 'terraform' },
+      { question: 'Design a centralized logging and monitoring stack for microservices. Cover: log aggregation, distributed tracing, alerting, dashboards, and anomaly detection.', type: 'system_design', followUp: 'How do you handle alert fatigue? What is your on-call runbook structure?' },
+      { question: 'Implement a Kubernetes operator (or describe the architecture) for automatically managing a stateful application. Handle: scaling, backups, failover, and configuration changes.', type: 'dsa', followUp: 'How does a Kubernetes operator differ from a Helm chart? When would you build a custom operator?', answerHint: 'k8s operator' },
+    ],
+    dsa: [
+      { question: 'Write a bash script that performs health checks on multiple services, rotates logs, and sends alerts via webhook on failures. Handle concurrent checks.', type: 'dsa', followUp: 'How would you make this idempotent and fault-tolerant? What about running it as a cron vs systemd service?', answerHint: 'health check' },
+      { question: 'Design a secrets management solution. Compare: Vault, AWS Secrets Manager, K8s secrets. Implement rotation for database credentials without downtime.', type: 'dsa', followUp: 'How do you handle secret access auditing? What about dev vs staging vs production environments?', answerHint: 'secrets management' },
+      { question: 'Write a chaos engineering experiment: randomly terminate pods, inject network latency, and simulate disk failure. Measure and report system resilience.', type: 'dsa', followUp: 'How do you run chaos experiments safely in production? What guardrails should be in place?', answerHint: 'chaos engineering' },
+      { question: 'Implement a service mesh concept: design a sidecar proxy that handles: service discovery, load balancing, mTLS, circuit breaking, and observability.', type: 'dsa', followUp: 'Compare Istio, Linkerd, and Consul Connect. When is a service mesh overkill?', answerHint: 'service mesh' },
+    ],
+    behavioral: [
+      { question: 'Describe a time you automated a manual process that saved significant team time. What was the process?', type: 'behavioral', followUp: 'How do you prioritize which processes to automate? What\'s the ROI framework?' },
+      { question: 'Tell me about a security vulnerability you discovered or responded to. How did you handle it?', type: 'behavioral', followUp: 'What security practices do you bake into your CI/CD pipeline?' },
+      { question: 'Describe migrating an application to the cloud. What were the biggest challenges?', type: 'behavioral', followUp: 'What\'s your approach to hybrid cloud vs full cloud migration?' },
+    ],
+  },
+
+  'Product Manager': {
+    full: [
+      { question: 'You\'re the PM for "AI-powered search" on an e-commerce platform. Write a PRD outline: problem statement, personas, KPIs, prioritized features, timeline.', type: 'system_design', followUp: 'How would you set up A/B testing? What metrics indicate success?' },
+      { question: 'User retention drops 40% after the first week. Walk me through your analytical approach: data to examine, hypotheses, prioritization.', type: 'dsa', followUp: 'How would you communicate findings and proposed solutions to get engineering buy-in?' },
+      { question: 'Tell me about a difficult product decision with incomplete data. Approach, outcome, retrospective.', type: 'behavioral', followUp: 'How do you balance data-driven decisions with intuition and user empathy?' },
+      { question: 'Design a notification system product strategy. Cover: notification types, user preferences, frequency optimization, cross-channel (email, push, in-app), and user fatigue prevention.', type: 'system_design', followUp: 'How do you measure notification effectiveness? What\'s your approach to A/B test notification copy and timing?' },
+      { question: 'Revenue has been flat for 3 quarters. Perform a product diagnosis: what data would you analyze, what experiments would you run, and what strategic bets would you make?', type: 'dsa', followUp: 'How do you balance short-term revenue tactics with long-term product vision?' },
+      { question: 'Tell me about a time you had to say "no" to a key stakeholder or executive request. How did you handle it?', type: 'behavioral', followUp: 'How do you build trust with stakeholders while maintaining product integrity?' },
+      { question: 'Create a go-to-market strategy for a new B2B SaaS product. Cover: ICP, pricing, channels, messaging, competitive positioning, and success metrics.', type: 'system_design', followUp: 'How do you test pricing? What frameworks do you use for competitive analysis?' },
+      { question: 'Design a user onboarding flow that maximizes activation rate. Cover: progressive disclosure, personalization, tooltips, checklists, and empty states.', type: 'dsa', followUp: 'How do you identify the "aha moment" for your product? What metrics define successful onboarding?' },
+    ],
+    dsa: [
+      { question: 'Design a prioritization framework for 50+ feature requests from different stakeholders. Create a scoring model (RICE, ICE, or custom).', type: 'dsa', followUp: 'How do you handle stakeholder conflicts? Negotiation strategy.' },
+      { question: 'Create a metrics dashboard for a subscription SaaS. Define: North Star, leading/lagging indicators, guardrail metrics. Daily vs weekly vs monthly reviews.', type: 'dsa', followUp: 'How would you set up alerts? Escalation thresholds?' },
+      { question: 'Design a user research plan for validating a new product idea. Cover: methodology selection, recruit strategy, interview guide, and synthesis framework.', type: 'dsa', followUp: 'How do you avoid confirmation bias in user research? What\'s the right sample size?' },
+      { question: 'Build a product analytics framework: define the event taxonomy, implement a tracking plan, and create a dashboard for a social media app.', type: 'dsa', followUp: 'How do you handle data quality issues? What\'s your approach to data governance?' },
+    ],
+    behavioral: [
+      { question: 'Describe a feature launch that failed. What happened, how did you measure failure, and what did you learn?', type: 'behavioral', followUp: 'How has that experience changed your approach to product validation?' },
+      { question: 'Tell me about working with a difficult engineer or design partner. How did you align on product direction?', type: 'behavioral', followUp: 'What techniques do you use to build empathy across engineering and design teams?' },
+      { question: 'Describe a time you pivoted product strategy based on market or user feedback.', type: 'behavioral', followUp: 'How do you differentiate between noise and signal in user feedback?' },
+    ],
+  },
+
+  'System Design': {
+    full: [
+      { question: 'Design Twitter backend: tweet publishing, timeline generation (fan-out on write vs read), search, trending topics, notifications, media storage. 500M+ users.', type: 'system_design', followUp: 'How do you handle celebrity users with millions of followers?' },
+      { question: 'Design a distributed key-value store like DynamoDB: consistent hashing, quorum replication (W+R>N), vector clocks, gossip protocol for failure detection.', type: 'dsa', followUp: 'How do you handle node failures during writes? Explain hinted handoff and anti-entropy repair.', answerHint: 'distributed kv' },
+      { question: 'Tell me about a system you designed or improved. Requirements, trade-offs, and real-world performance.', type: 'behavioral', followUp: 'What\'s your process for evaluating CAP theorem trade-offs in practice?' },
+      { question: 'Design YouTube\'s video processing and serving pipeline. Cover: upload, transcoding, CDN distribution, adaptive bitrate streaming, and recommendation integration.', type: 'system_design', followUp: 'How do you handle viral videos? What\'s your CDN cache invalidation strategy?' },
+      { question: 'Design a distributed transaction coordinator supporting two-phase commit (2PC) and saga pattern. Compare both approaches.', type: 'dsa', followUp: 'What happens when the coordinator fails in 2PC? How do sagas handle compensating transactions?', answerHint: 'distributed transaction' },
+      { question: 'Tell me about a time you had to redesign a system due to scaling issues. How did you migrate without downtime?', type: 'behavioral', followUp: 'How do you convince stakeholders to invest in infrastructure improvements?' },
+      { question: 'Design Uber\'s ride matching system. Cover: geospatial indexing, real-time matching, surge pricing, ETA calculation, and driver allocation optimization.', type: 'system_design', followUp: 'How do you handle supply-demand imbalance? What data structures for geospatial queries?' },
+      { question: 'Design a web crawler that can index 1 billion pages. Cover: URL frontier, politeness, deduplication, distributed crawling, and incremental updates.', type: 'system_design', followUp: 'How do you handle dynamic JavaScript-rendered content? What about crawler traps?' },
+      { question: 'Design a payment processing system like Stripe. Cover: idempotency, distributed transactions, retry logic, webhooks, PCI compliance, and multi-currency support.', type: 'system_design', followUp: 'How do you handle payment failures gracefully? What about refund processing and reconciliation?' },
+    ],
+    dsa: [
+      { question: 'Implement a Bloom filter from scratch. Include: optimal hash count, false positive rate estimation, and dynamic resizing.', type: 'dsa', followUp: 'What\'s a Counting Bloom filter? How about Cuckoo filters?', answerHint: 'bloom filter' },
+      { question: 'Implement a simple Raft consensus algorithm. Cover: leader election, log replication, heartbeats, and split-brain handling.', type: 'dsa', followUp: 'How does Raft compare to Paxos? When choose one over the other?', answerHint: 'raft' },
+      { question: 'Implement a Merkle tree and demonstrate its use for data integrity verification in a distributed system.', type: 'dsa', followUp: 'How are Merkle trees used in Git and blockchain? What is a Merkle DAG?', answerHint: 'merkle tree' },
+      { question: 'Build a simple LSM tree (Log-Structured Merge tree) storage engine with: memtable, SSTables, compaction, and bloom filter integration.', type: 'dsa', followUp: 'Compare LSM trees vs B-trees for storage engines. When would you choose each?', answerHint: 'lsm tree' },
+      { question: 'Implement a skip list and explain why Redis uses skip lists instead of balanced BSTs for sorted sets.', type: 'dsa', followUp: 'What is the expected time complexity? How does a probabilistic data structure compare to deterministic ones?', answerHint: 'skip list' },
+    ],
+    behavioral: [
+      { question: 'Describe a time you proposed a system design that was rejected by your team. What happened and what did you learn?', type: 'behavioral', followUp: 'How do you evaluate competing system designs objectively?' },
+      { question: 'Tell me about a time you had to explain a complex distributed systems concept to a non-technical audience.', type: 'behavioral', followUp: 'What analogies work best for explaining distributed systems trade-offs?' },
+      { question: 'Describe working on a system with strict reliability requirements (99.99% uptime). What practices did you follow?', type: 'behavioral', followUp: 'How do you calculate and budget error budgets? What is your SLO philosophy?' },
     ],
   },
 };
 
 const DEFAULT_QUESTIONS = {
   full: [
-    { question: 'Given an array of integers and a target sum, find all unique pairs of numbers that add up to the target. Your solution should handle duplicates and be as efficient as possible. Explain your approach.', type: 'dsa' as const, followUp: 'Good work! Your current solution is O(n) time. Can you now solve it for triplets (3-sum problem)? How does the complexity change?', answerHint: 'two sum' },
-    { question: 'Design a notification service that handles millions of users across email, SMS, and push notifications. Consider rate limiting, retry logic, and delivery guarantees.', type: 'system_design' as const, followUp: 'Great architecture! How would you handle cases where SNS/SQS goes down? What fallback mechanisms would you implement?' },
-    { question: 'Tell me about yourself and why you\'re interested in this role. What makes you stand out from other candidates?', type: 'behavioral' as const, followUp: 'Good introduction! Where do you see yourself in 5 years, and how does this position align with that vision?' },
+    { question: 'Given an array of integers and a target sum, find all unique pairs that add up to the target. Handle duplicates efficiently. Explain your approach.', type: 'dsa' as const, followUp: 'Can you now solve it for triplets (3-sum)? How does the complexity change?', answerHint: 'two sum' },
+    { question: 'Design a notification service for millions of users across email, SMS, and push. Consider rate limiting, retry logic, and delivery guarantees.', type: 'system_design' as const, followUp: 'How would you handle SNS/SQS downtime? What fallback mechanisms?' },
+    { question: 'Tell me about yourself and why you\'re interested in this role. What makes you stand out?', type: 'behavioral' as const, followUp: 'Where do you see yourself in 5 years? How does this role align?' },
+    { question: 'Implement a function to detect if a string has all unique characters. Do it without using any additional data structures.', type: 'dsa' as const, followUp: 'What is the time complexity? Can you do it in O(1) space?', answerHint: 'unique chars' },
+    { question: 'Design a URL analytics dashboard showing clicks by country, device, time. Handle real-time vs batch processing.', type: 'system_design' as const, followUp: 'How would you handle late-arriving data? What about data deduplication?' },
+    { question: 'Tell me about a time you went above and beyond for a project. What motivated you?', type: 'behavioral' as const, followUp: 'How do you maintain work-life balance while staying committed to quality?' },
   ],
   dsa: [
-    { question: 'Implement a function to serialize and deserialize a binary tree. Your solution should handle any tree structure and be able to reconstruct the exact same tree.', type: 'dsa' as const, followUp: 'Nice solution! What is the time and space complexity? How would you handle very deep trees to avoid stack overflow?' },
+    { question: 'Serialize and deserialize a binary tree. Handle any structure and reconstruct the exact same tree.', type: 'dsa' as const, followUp: 'Time and space complexity? How would you handle very deep trees?', answerHint: 'serialize tree' },
+    { question: 'Implement a min-stack that supports push, pop, top, and getMin — all in O(1) time.', type: 'dsa' as const, followUp: 'Can you do it with O(1) extra space? What trade-offs does that introduce?', answerHint: 'min stack' },
+    { question: 'Find the median of a stream of integers. Design a data structure that supports adding numbers and finding the median efficiently.', type: 'dsa' as const, followUp: 'What is the time complexity of each operation? Can you improve it with a balanced BST?', answerHint: 'median stream' },
   ],
   behavioral: [
-    { question: 'Describe a time when you had to learn a new technology or skill quickly due to project requirements. How did you approach the learning, and what was the outcome?', type: 'behavioral' as const, followUp: 'Impressive adaptability! What resources or methods do you rely on most when learning something new?' },
+    { question: 'Describe learning a new technology quickly for a project. How did you approach it?', type: 'behavioral' as const, followUp: 'What resources or methods do you rely on most when learning something new?' },
+    { question: 'Tell me about handling a disagreement with your manager about technical direction.', type: 'behavioral' as const, followUp: 'How do you maintain a positive relationship while standing your ground on technical decisions?' },
   ],
 };
+
 
 const CODE_STARTERS: Record<string, string> = {
   python: `# Write your solution here
@@ -175,7 +376,13 @@ function InterviewSessionContent() {
     }
   };
 
-  const questions = (AI_QUESTIONS[role]?.[type] || DEFAULT_QUESTIONS[type] || DEFAULT_QUESTIONS.full);
+  // Pick random questions from the pool once per session (stable within session, random across sessions)
+  const questions = useMemo(() => {
+    const pool = AI_QUESTIONS[role]?.[type] || DEFAULT_QUESTIONS[type] || DEFAULT_QUESTIONS.full;
+    const count = type === 'full' ? 3 : type === 'dsa' ? 2 : 1;
+    return shufflePick(pool, Math.min(count, pool.length));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role, type]);
   const currentQ = questions[currentQIdx];
 
   // Window change protection - auto-end interview on tab switch
