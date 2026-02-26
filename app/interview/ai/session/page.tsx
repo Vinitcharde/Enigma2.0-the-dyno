@@ -4,11 +4,12 @@ import { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { useWindowChangeProtection } from '@/lib/useWindowChangeProtection';
+import { useTTS } from '@/lib/useTTS';
 import dynamic from 'next/dynamic';
 import {
   Brain, Mic, MicOff, Play, Square, Send, Code2,
   AlertTriangle, Maximize, ChevronRight, Clock, X,
-  Volume2, Star, TrendingUp, Target, Zap, MessageSquare
+  Volume2, VolumeX, Star, TrendingUp, Target, Zap, MessageSquare
 } from 'lucide-react';
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), {
@@ -142,6 +143,38 @@ function InterviewSessionContent() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
 
+  // Text-to-Speech integration
+  const tts = useTTS({ rate: 1.05, preferredVoice: 'Google' });
+  const lastSpokenRef = useRef<string>('');
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  // Helper: call the AI interview API
+  const callAI = async (payload: Record<string, any>): Promise<{ response: string; scores?: any; fallback?: boolean }> => {
+    try {
+      setAiError(null);
+      const res = await fetch('/api/ai-interview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...payload,
+          role,
+          type,
+          difficulty,
+          question: currentQ.question,
+          chatHistory: messages.map(m => ({ role: m.role, content: m.content })),
+        }),
+      });
+      if (!res.ok) throw new Error(`API error: ${res.status}`);
+      const data = await res.json();
+      if (data.fallback) setAiError('AI temporarily unavailable — using fallback responses');
+      return data;
+    } catch (err: any) {
+      console.error('AI API Error:', err);
+      setAiError('Could not reach AI — using local feedback');
+      return { response: '', fallback: true };
+    }
+  };
+
   const questions = (AI_QUESTIONS[role]?.[type] || DEFAULT_QUESTIONS[type] || DEFAULT_QUESTIONS.full);
   const currentQ = questions[currentQIdx];
 
@@ -178,6 +211,11 @@ function InterviewSessionContent() {
   const addMessage = (role: 'ai' | 'user', content: string) => {
     setMessages(m => [...m, { role, content, timestamp: new Date() }]);
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+    // Auto-speak AI messages
+    if (role === 'ai' && content !== lastSpokenRef.current) {
+      lastSpokenRef.current = content;
+      tts.speak(content);
+    }
   };
 
   const startInterview = () => {
@@ -225,6 +263,9 @@ Estimated time complexity: ${complexity}`);
       recognitionRef.current?.stop();
       setIsRecording(false);
     } else {
+      // Auto-pause TTS when user starts speaking to avoid feedback
+      if (tts.isSpeaking) tts.stop();
+
       if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
         const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
         const rec = new SR();
@@ -232,8 +273,35 @@ Estimated time complexity: ${complexity}`);
         rec.interimResults = true;
         rec.lang = 'en-US';
         rec.onresult = (e: any) => {
-          const t = Array.from(e.results).map((r: any) => r[0].transcript).join('');
-          setTranscript(t);
+          let finalText = '';
+          let interimText = '';
+          for (let i = 0; i < e.results.length; i++) {
+            const result = e.results[i];
+            if (result.isFinal) {
+              finalText += result[0].transcript;
+            } else {
+              interimText += result[0].transcript;
+            }
+          }
+          setTranscript(finalText + interimText);
+          // Also populate the userInput for easy editing
+          setUserInput(prev => {
+            if (!prev || prev === transcript) return finalText + interimText;
+            return prev;
+          });
+        };
+        rec.onerror = (e: any) => {
+          console.warn('Speech recognition error:', e.error);
+          if (e.error === 'not-allowed') {
+            setTranscript('(Microphone access denied. Please allow microphone access and try again.)');
+          }
+          setIsRecording(false);
+        };
+        rec.onend = () => {
+          // Auto-restart if still in recording mode (browser sometimes stops)
+          if (isRecording && recognitionRef.current === rec) {
+            try { rec.start(); } catch (e) { setIsRecording(false); }
+          }
         };
         rec.start();
         recognitionRef.current = rec;
@@ -246,47 +314,87 @@ Estimated time complexity: ${complexity}`);
 
   const submitAnswer = async (text: string) => {
     if (!text.trim()) return;
+    // Stop recording if active
+    if (isRecording) {
+      recognitionRef.current?.stop();
+      setIsRecording(false);
+    }
     addMessage('user', text);
     setTranscript('');
     setUserInput('');
     setAiTyping(true);
-    setScores(s => ({ ...s, communication: Math.min(100, s.communication + 15), problemSolving: Math.min(100, s.problemSolving + 10) }));
 
-    await new Promise(r => setTimeout(r, 2000));
-    setAiTyping(false);
-
-    if (phase === 'voice') {
-      addMessage('ai', `Great explanation! ${currentQ.followUp}`);
+    if (phase === 'coding') {
+      // During coding phase: user is asking questions or explaining their thought process
+      const data = await callAI({ action: 'evaluate_response', userMessage: text });
+      setAiTyping(false);
+      if (data.response) {
+        addMessage('ai', data.response);
+      } else {
+        addMessage('ai', 'That\'s an interesting approach! Keep working on your solution. Feel free to ask me any questions about the problem.');
+      }
+      setScores(s => ({ ...s, communication: Math.min(100, s.communication + 5) }));
+    } else if (phase === 'voice') {
+      // AI evaluates the verbal explanation
+      const data = await callAI({ action: 'evaluate_response', userMessage: text });
+      setAiTyping(false);
+      if (data.response) {
+        addMessage('ai', data.response);
+      } else {
+        addMessage('ai', `Great explanation! ${currentQ.followUp}`);
+      }
+      setScores(s => ({ ...s, communication: Math.min(100, s.communication + 15), problemSolving: Math.min(100, s.problemSolving + 10) }));
       setPhase('followup');
     } else if (phase === 'followup') {
-      if (currentQIdx < questions.length - 1) {
-        const nextQ = questions[currentQIdx + 1];
-        setCurrentQIdx(i => i + 1);
-        setCode(CODE_STARTERS[language]);
-        setOutput('');
-        addMessage('ai', `Excellent! Moving on to question ${currentQIdx + 2}:\n\n**${nextQ.question}**`);
-        setPhase('coding');
-      } else {
-        finalizeSession();
+      // AI generates follow-up response
+      const data = await callAI({ action: 'generate_followup', userMessage: text });
+      setAiTyping(false);
+      if (data.response) {
+        addMessage('ai', data.response);
       }
+      setScores(s => ({ ...s, communication: Math.min(100, s.communication + 10), problemSolving: Math.min(100, s.problemSolving + 8) }));
+
+      // After follow-up, move to next question or finalize
+      setTimeout(async () => {
+        if (currentQIdx < questions.length - 1) {
+          const nextQ = questions[currentQIdx + 1];
+          setCurrentQIdx(i => i + 1);
+          setCode(CODE_STARTERS[language]);
+          setOutput('');
+          addMessage('ai', `Great, let's move on!\n\n**Question ${currentQIdx + 2}:** ${nextQ.question}\n\nTake your time and think through your approach.`);
+          setPhase('coding');
+        } else {
+          finalizeSession();
+        }
+      }, 2000);
     }
   };
 
   const finalizeSession = async () => {
     setAiTyping(true);
-    await new Promise(r => setTimeout(r, 2000));
+
+    // Call AI for final evaluation with full conversation context
+    const data = await callAI({ action: 'final_evaluation' });
     setAiTyping(false);
-    const finalScores = {
-      technical: 78 + Math.floor(Math.random() * 15),
-      problemSolving: 72 + Math.floor(Math.random() * 18),
-      communication: 80 + Math.floor(Math.random() * 15),
-      optimization: 68 + Math.floor(Math.random() * 20),
-    };
-    setScores(finalScores);
-    const overall = Math.round(finalScores.technical * 0.4 + finalScores.problemSolving * 0.25 + finalScores.communication * 0.2 + finalScores.optimization * 0.15);
-    addMessage('ai', `🎉 Interview Complete! Here's your performance summary:\n\n**Overall Score: ${overall}/100**\n\n• Technical (40%): ${finalScores.technical}%\n• Problem Solving (25%): ${finalScores.problemSolving}%\n• Communication (20%): ${finalScores.communication}%\n• Optimization (15%): ${finalScores.optimization}%\n\n**Strengths:** Clear communication, good problem decomposition\n**Areas to improve:** Time complexity analysis, edge case handling\n\nGreat effort! Review your results below.`);
+
+    if (data.scores) {
+      setScores(data.scores);
+      const overall = Math.round(data.scores.technical * 0.4 + data.scores.problemSolving * 0.25 + data.scores.communication * 0.2 + data.scores.optimization * 0.15);
+      addMessage('ai', data.response || `🎉 Interview Complete!\n\n**Overall Score: ${overall}/100**\n\nReview your detailed breakdown below.`);
+    } else {
+      // Fallback scores if AI doesn't return them
+      const fallbackScores = {
+        technical: 72 + Math.floor(Math.random() * 15),
+        problemSolving: 68 + Math.floor(Math.random() * 18),
+        communication: 75 + Math.floor(Math.random() * 15),
+        optimization: 65 + Math.floor(Math.random() * 20),
+      };
+      setScores(fallbackScores);
+      const overall = Math.round(fallbackScores.technical * 0.4 + fallbackScores.problemSolving * 0.25 + fallbackScores.communication * 0.2 + fallbackScores.optimization * 0.15);
+      addMessage('ai', data.response || `🎉 Interview Complete!\n\n**Overall Score: ${overall}/100**\n\n• Technical (40%): ${fallbackScores.technical}%\n• Problem Solving (25%): ${fallbackScores.problemSolving}%\n• Communication (20%): ${fallbackScores.communication}%\n• Optimization (15%): ${fallbackScores.optimization}%\n\nReview your detailed results below.`);
+    }
     setPhase('complete');
-    if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    if (document.exitFullscreen) document.exitFullscreen().catch(() => { });
   };
 
   const formatTime = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -335,6 +443,13 @@ Estimated time complexity: ${complexity}`);
           <div style={{ fontSize: '0.9rem', opacity: 0.95 }}>Switching tabs or windows ended your interview. Your results are being submitted.</div>
         </div>
       )}
+      {/* AI Status Indicator */}
+      {aiError && (
+        <div style={{ position: 'fixed', bottom: 16, right: 16, background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.3)', color: '#fbbf24', padding: '8px 14px', borderRadius: 8, fontSize: '0.75rem', zIndex: 9999, maxWidth: 300, display: 'flex', alignItems: 'center', gap: 6 }}>
+          ⚠ {aiError}
+          <button onClick={() => setAiError(null)} style={{ background: 'none', border: 'none', color: '#fbbf24', cursor: 'pointer', padding: '0 4px', fontSize: '1rem' }}>×</button>
+        </div>
+      )}
       {/* Top bar */}
       <div style={{ padding: '12px 24px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -346,14 +461,47 @@ Estimated time complexity: ${complexity}`);
           <span className="badge badge-blue" style={{ fontSize: '0.75rem' }}>{type.toUpperCase()}</span>
           {tabSwitches > 0 && <span className="badge badge-red" style={{ fontSize: '0.75rem' }}>⚠ {tabSwitches} warning{tabSwitches > 1 ? 's' : ''}</span>}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          {/* TTS Controls */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 8, background: tts.isEnabled ? 'rgba(124,58,237,0.15)' : 'rgba(255,255,255,0.05)', border: `1px solid ${tts.isEnabled ? 'rgba(124,58,237,0.3)' : 'var(--border)'}`, transition: 'all 0.3s' }}>
+            <button onClick={tts.toggleEnabled} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: 2 }} title={tts.isEnabled ? 'Mute AI Voice' : 'Enable AI Voice'}>
+              {tts.isEnabled ? <Volume2 size={15} color="#a78bfa" /> : <VolumeX size={15} color="#5a5a7a" />}
+            </button>
+            {tts.isEnabled && (
+              <>
+                {tts.isSpeaking && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 2 }}>
+                    {[0, 1, 2, 3].map(i => (
+                      <div key={i} style={{
+                        width: 2, background: '#a78bfa', borderRadius: 1,
+                        animation: `ttsWave 0.6s ease-in-out ${i * 0.1}s infinite alternate`,
+                      }} />
+                    ))}
+                  </div>
+                )}
+                <select
+                  value={String(tts.selectedVoice?.name || '')}
+                  onChange={e => {
+                    const v = tts.voices.find(v => v.name === e.target.value);
+                    if (v) tts.setVoice(v);
+                  }}
+                  style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', fontSize: '0.68rem', outline: 'none', cursor: 'pointer', maxWidth: 90 }}
+                  title="Select voice"
+                >
+                  {tts.voices.filter(v => v.lang.startsWith('en')).slice(0, 10).map(v => (
+                    <option key={v.name} value={v.name} style={{ background: '#1a1a2e', color: '#e8e8f0' }}>{v.name.replace('Microsoft ', '').replace('Google ', '').substring(0, 20)}</option>
+                  ))}
+                </select>
+              </>
+            )}
+          </div>
           <span style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
             <Clock size={14} style={{ display: 'inline', marginRight: 4 }} />
             {formatTime(sessionTime)}
           </span>
           <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Q {currentQIdx + 1}/{questions.length}</span>
           {phase !== 'complete' && (
-            <button className="btn-ghost" onClick={finalizeSession} style={{ padding: '6px 14px', fontSize: '0.8rem' }}>End Session</button>
+            <button className="btn-ghost" onClick={() => { tts.stop(); finalizeSession(); }} style={{ padding: '6px 14px', fontSize: '0.8rem' }}>End Session</button>
           )}
         </div>
       </div>
@@ -369,8 +517,8 @@ Estimated time complexity: ${complexity}`);
             </div>
             <div>
               <div style={{ fontWeight: 700, color: 'white', fontSize: '0.88rem' }}>AI Interviewer</div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--accent-green)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                <div className="pulse-dot" style={{ width: 6, height: 6 }} /> Online
+              <div style={{ fontSize: '0.72rem', color: tts.isSpeaking ? '#a78bfa' : 'var(--accent-green)', display: 'flex', alignItems: 'center', gap: 4, transition: 'color 0.3s' }}>
+                <div className="pulse-dot" style={{ width: 6, height: 6, background: tts.isSpeaking ? '#a78bfa' : undefined }} /> {tts.isSpeaking ? '🔊 Speaking...' : 'Online'}
               </div>
             </div>
           </div>
@@ -385,7 +533,20 @@ Estimated time complexity: ${complexity}`);
             )}
             {messages.map((msg, i) => (
               <div key={i} className={msg.role === 'ai' ? 'chat-bubble-ai' : 'chat-bubble-user'} style={{ fontSize: '0.85rem', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>
-                {msg.role === 'ai' && <span style={{ color: '#a78bfa', fontWeight: 700, display: 'block', marginBottom: 4, fontSize: '0.75rem' }}>AI INTERVIEWER</span>}
+                {msg.role === 'ai' && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span style={{ color: '#a78bfa', fontWeight: 700, fontSize: '0.75rem' }}>AI INTERVIEWER</span>
+                    <button
+                      onClick={() => tts.speak(msg.content)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, opacity: 0.6, transition: 'opacity 0.2s' }}
+                      onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+                      onMouseLeave={e => (e.currentTarget.style.opacity = '0.6')}
+                      title="Replay this message"
+                    >
+                      <Volume2 size={13} color="#a78bfa" />
+                    </button>
+                  </div>
+                )}
                 {msg.content}
               </div>
             ))}
@@ -399,42 +560,116 @@ Estimated time complexity: ${complexity}`);
             <div ref={chatEndRef} />
           </div>
 
-          {/* Input area */}
+          {/* Input area — Voice + Text always available in all active phases */}
           {phase !== 'complete' && phase !== 'intro' && (
-            <div style={{ padding: '16px', borderTop: '1px solid var(--border)' }}>
-              {phase === 'voice' || phase === 'followup' ? (
-                <div>
-                  {transcript && (
-                    <div style={{ background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.3)', borderRadius: 10, padding: '10px 14px', marginBottom: 10, fontSize: '0.82rem', color: 'var(--text-secondary)', maxHeight: 80, overflowY: 'auto' }}>
-                      {transcript}
+            <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
+              {/* Phase indicator */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: phase === 'coding' ? '#22d3ee' : phase === 'voice' ? '#34d399' : '#f59e0b' }} />
+                <span style={{ fontSize: '0.68rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  {phase === 'coding' ? '💻 Coding Phase — Speak or type to ask questions' : phase === 'voice' ? '🎤 Voice Phase — Explain your approach' : '💬 Follow-up — Answer the question'}
+                </span>
+              </div>
+
+              {/* Live transcript preview */}
+              {(transcript || isRecording) && (
+                <div style={{
+                  background: isRecording ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.08)',
+                  border: `1px solid ${isRecording ? 'rgba(124,58,237,0.4)' : 'rgba(124,58,237,0.2)'}`,
+                  borderRadius: 10, padding: '8px 14px', marginBottom: 8,
+                  fontSize: '0.8rem', color: 'var(--text-secondary)',
+                  maxHeight: 60, overflowY: 'auto',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  transition: 'all 0.3s',
+                }}>
+                  {isRecording && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+                      {[0, 1, 2].map(i => (
+                        <div key={i} style={{
+                          width: 3, background: '#a78bfa', borderRadius: 2,
+                          animation: `ttsWave 0.5s ease-in-out ${i * 0.12}s infinite alternate`,
+                        }} />
+                      ))}
                     </div>
                   )}
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={toggleVoice} style={{
-                      width: 42, height: 42, borderRadius: '50%', border: 'none', cursor: 'pointer', flexShrink: 0,
-                      background: isRecording ? 'rgba(239,68,68,0.2)' : 'rgba(124,58,237,0.2)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      animation: isRecording ? 'pulse 1s infinite' : 'none',
-                    }}>
-                      {isRecording ? <MicOff size={18} color="#f87171" /> : <Mic size={18} color="#a78bfa" />}
-                    </button>
-                    <textarea value={userInput} onChange={e => setUserInput(e.target.value)} placeholder="Type or use voice to answer..." style={{ flex: 1, background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', color: 'white', fontSize: '0.83rem', resize: 'none', fontFamily: 'Inter, sans-serif', outline: 'none', height: 42, lineHeight: '22px' }} />
-                    <button onClick={() => submitAnswer(userInput || transcript)} className="btn-primary" style={{ width: 42, height: 42, padding: 0, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      <Send size={16} />
-                    </button>
-                  </div>
+                  <span>{transcript || (isRecording ? 'Listening...' : '')}</span>
                 </div>
-              ) : phase === 'coding' && (
-                <button onClick={() => {
-                  addMessage('user', `[Code submitted in ${language}]`);
-                  setPhase('voice');
+              )}
+
+              {/* Unified input row: Mic + TextArea + Send */}
+              <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+                {/* Mic button */}
+                <button onClick={toggleVoice} title={isRecording ? 'Stop recording' : 'Start voice input'} style={{
+                  width: 40, height: 40, borderRadius: '50%', border: 'none', cursor: 'pointer', flexShrink: 0,
+                  background: isRecording ? 'rgba(239,68,68,0.25)' : 'rgba(124,58,237,0.2)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  animation: isRecording ? 'pulse 1.5s infinite' : 'none',
+                  transition: 'background 0.3s',
+                  boxShadow: isRecording ? '0 0 12px rgba(239,68,68,0.3)' : 'none',
+                }}>
+                  {isRecording ? <MicOff size={17} color="#f87171" /> : <Mic size={17} color="#a78bfa" />}
+                </button>
+
+                {/* Text input */}
+                <textarea
+                  value={userInput}
+                  onChange={e => setUserInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      submitAnswer(userInput || transcript);
+                    }
+                  }}
+                  placeholder={phase === 'coding' ? 'Ask a question or explain your thinking...' : phase === 'voice' ? 'Explain your approach...' : 'Type your follow-up answer...'}
+                  style={{
+                    flex: 1, background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)',
+                    borderRadius: 10, padding: '9px 14px', color: 'white', fontSize: '0.82rem',
+                    resize: 'none', fontFamily: 'Inter, sans-serif', outline: 'none',
+                    height: 40, lineHeight: '22px', transition: 'border-color 0.2s',
+                  }}
+                  onFocus={e => e.currentTarget.style.borderColor = 'rgba(124,58,237,0.5)'}
+                  onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'}
+                />
+
+                {/* Send button */}
+                <button
+                  onClick={() => submitAnswer(userInput || transcript)}
+                  disabled={!(userInput.trim() || transcript.trim()) || aiTyping}
+                  className="btn-primary"
+                  title="Send message"
+                  style={{
+                    width: 40, height: 40, padding: 0, borderRadius: 10,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                    opacity: (userInput.trim() || transcript.trim()) && !aiTyping ? 1 : 0.4,
+                  }}
+                >
+                  <Send size={15} />
+                </button>
+              </div>
+
+              {/* Code submit button (only during coding phase) */}
+              {phase === 'coding' && (
+                <button onClick={async () => {
+                  if (isRecording) { recognitionRef.current?.stop(); setIsRecording(false); }
+                  addMessage('user', `[Code submitted in ${language}]\n\`\`\`${language}\n${code}\n\`\`\``);
                   setAiTyping(true);
-                  setTimeout(() => {
-                    setAiTyping(false);
+
+                  const data = await callAI({ action: 'analyze_code', code, language });
+                  setAiTyping(false);
+
+                  if (data.response) {
+                    addMessage('ai', data.response);
+                  } else {
                     addMessage('ai', 'Good work on the code! Now let\'s evaluate your communication. Please explain your solution verbally — walk me through your approach, why you chose this algorithm, and the time/space complexity.');
-                  }, 1500);
-                }} className="btn-primary" style={{ width: '100%', padding: '10px', fontSize: '0.85rem' }}>
-                  Submit Code & Continue to Voice Evaluation →
+                  }
+                  setScores(s => ({ ...s, technical: Math.min(100, s.technical + 15) }));
+                  setPhase('voice');
+                }} className="btn-primary" style={{
+                  width: '100%', padding: '9px', fontSize: '0.82rem', marginTop: 8,
+                  background: 'linear-gradient(135deg, #06b6d4 0%, #7c3aed 100%)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                }}>
+                  <Code2 size={15} /> Submit Code & Continue to AI Analysis →
                 </button>
               )}
             </div>

@@ -473,3 +473,15 @@ body {
   z-index: 200;
   text-align: center;
 }
+
+/* TTS Wave animation */
+@keyframes ttsWave {
+  0% { height: 4px; }
+  100% { height: 16px; }
+}
+
+/* Speaking glow on AI chat bubble */
+.chat-bubble-ai.speaking {
+  border-color: rgba(167, 139, 250, 0.4);
+  box-shadow: 0 0 15px rgba(124, 58, 237, 0.15);
+}
