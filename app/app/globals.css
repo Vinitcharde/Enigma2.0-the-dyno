@@ -226,6 +226,32 @@ body {
 }
 .input-field::placeholder { color: var(--text-muted); }
 
+/* Select / dropdown styling for dark theme */
+select.input-field {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 40px;
+  cursor: pointer;
+}
+select.input-field option {
+  background: #1a1a2e;
+  color: #e2e8f0;
+  padding: 10px 14px;
+  font-size: 0.92rem;
+  border: none;
+}
+select.input-field option:checked {
+  background: rgba(124, 58, 237, 0.3);
+  color: #c4b5fd;
+}
+select.input-field option:hover {
+  background: rgba(124, 58, 237, 0.2);
+}
+
 /* Form label */
 .form-label {
   display: block;

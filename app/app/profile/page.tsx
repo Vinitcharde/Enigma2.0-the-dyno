@@ -219,10 +219,10 @@ export default function ProfilePage() {
               </div>
               <div style={{ marginTop: 20 }}>
                 <label className="form-label">Target Job Role</label>
-                <select className="input-field" value={form.targetRole} onChange={e => setField('targetRole', e.target.value)}>
-                  <option value="">Select your target role</option>
+                <select className="input-field" value={form.targetRole} onChange={e => setField('targetRole', e.target.value)} style={{ background: 'rgba(255,255,255,0.05)', color: form.targetRole ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                  <option value="" style={{ background: '#1a1a2e', color: '#9ca3af' }}>Select your target role</option>
                   {['Full Stack Developer', 'Backend Engineer', 'Frontend Developer', 'Data Scientist', 'ML Engineer', 'DevOps Engineer', 'Product Manager', 'Mobile Developer'].map(r => (
-                    <option key={r} value={r}>{r}</option>
+                    <option key={r} value={r} style={{ background: '#1a1a2e', color: '#e2e8f0' }}>{r}</option>
                   ))}
                 </select>
               </div>
