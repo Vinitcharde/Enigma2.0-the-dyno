@@ -24,10 +24,11 @@ const QUICK_STATS = [
 ];
 
 const JOB_RECOMMENDATIONS = [
-  { role: 'Full Stack Developer', match: 94, skills: ['React', 'Node.js', 'SQL'], companies: ['Google', 'Flipkart', 'Swiggy'] },
-  { role: 'Data Scientist', match: 87, skills: ['Python', 'ML', 'Statistics'], companies: ['Amazon', 'Myntra', 'Paytm'] },
-  { role: 'Backend Engineer', match: 81, skills: ['Python', 'Node.js', 'SQL'], companies: ['Microsoft', 'Razorpay', 'Zepto'] },
+  { role: 'Full Stack Developer', match: 94, skills: ['React', 'Node.js', 'SQL'], companies: ['TCS Nagpur', 'GlobalLogic'] },
+  { role: 'Data Scientist', match: 87, skills: ['Python', 'ML', 'Statistics'], companies: ['Persistent Systems (Nagpur)', 'InfoCepts'] },
+  { role: 'Backend Engineer', match: 81, skills: ['Python', 'Node.js', 'SQL'], companies: ['HCLTech Nagpur', 'Tech Mahindra'] },
 ];
+
 
 export default function DashboardPage() {
   const { user, isLoading } = useAuth();
