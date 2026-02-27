@@ -51,10 +51,13 @@ const EXPERTS_ALL = Object.values(ROLE_EXPERTS).flat();
 
 const TIME_SLOTS = ['09:00 AM', '11:00 AM', '01:00 PM', '03:00 PM', '05:00 PM', '07:00 PM'];
 
+// Always generate from today — never hardcode dates
 const NEXT_3_DAYS = (() => {
   const days = [];
-  for (let i = 1; i <= 3; i++) {
-    const d = new Date(2026, 1, 26 + i); // Feb 27-29
+  const today = new Date();
+  for (let i = 0; i < 3; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
     days.push({
       date: d.toISOString().split('T')[0],
       label: d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }),
@@ -62,6 +65,23 @@ const NEXT_3_DAYS = (() => {
   }
   return days;
 })();
+
+// Returns true if the given date+time slot is in the past
+function isSlotExpired(date: string, time: string): boolean {
+  const now = new Date();
+  const today = now.toISOString().split('T')[0];
+  if (date < today) return true;   // past date — all slots gone
+  if (date > today) return false;  // future date — never expired
+  // Same day: parse the time string (e.g. "09:00 AM")
+  const [timePart, meridiem] = time.split(' ');
+  const [h, m] = timePart.split(':').map(Number);
+  let hour24 = h;
+  if (meridiem === 'PM' && h !== 12) hour24 = h + 12;
+  if (meridiem === 'AM' && h === 12) hour24 = 0;
+  const slotTime = new Date();
+  slotTime.setHours(hour24, m, 0, 0);
+  return now >= slotTime;
+}
 
 type BookingStep = 1 | 2 | 3 | 4;
 
@@ -305,17 +325,45 @@ export default function BookInterviewPage() {
                     <div style={{ padding: '14px 16px', background: 'var(--bg-card)', borderBottom: '1px solid var(--border)', fontWeight: 700, color: 'white', fontSize: '0.88rem' }}>{label}</div>
                     <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
                       {TIME_SLOTS.map((time, i) => {
-                        const isAvailable = i % 2 === 0 || i === 3; // mock availability
+                        const expired = isSlotExpired(date, time);
+                        const isAvailable = !expired && (i % 2 === 0 || i === 3);
                         const isSelected = selectedDate === date && selectedTime === time;
                         return (
-                          <button key={time} onClick={() => { if (isAvailable) { setSelectedDate(date); setSelectedTime(time); } }} disabled={!isAvailable} style={{
-                            padding: '10px', borderRadius: 8, border: `1px solid ${isSelected ? 'var(--accent-purple)' : isAvailable ? 'var(--border)' : 'transparent'}`,
-                            background: isSelected ? 'rgba(124,58,237,0.2)' : isAvailable ? 'transparent' : 'rgba(255,255,255,0.02)',
-                            color: isSelected ? '#a78bfa' : isAvailable ? 'var(--text-secondary)' : 'var(--text-muted)',
-                            cursor: isAvailable ? 'pointer' : 'not-allowed', fontSize: '0.82rem', fontWeight: isSelected ? 700 : 500,
-                            textDecoration: !isAvailable ? 'line-through' : 'none', transition: 'all 0.15s',
-                          }}>
-                            {time} {!isAvailable && '(Booked)'}
+                          <button
+                            key={time}
+                            onClick={() => { if (isAvailable) { setSelectedDate(date); setSelectedTime(time); } }}
+                            disabled={!isAvailable}
+                            title={expired ? 'This time slot has already passed' : !isAvailable ? 'Slot already booked' : ''}
+                            style={{
+                              padding: '10px', borderRadius: 8, fontSize: '0.82rem', transition: 'all 0.15s',
+                              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                              border: `1px solid ${
+                                isSelected ? 'var(--accent-purple)'
+                                : expired ? 'rgba(239,68,68,0.2)'
+                                : isAvailable ? 'var(--border)'
+                                : 'transparent'
+                              }`,
+                              background: isSelected ? 'rgba(124,58,237,0.2)'
+                                : expired ? 'rgba(239,68,68,0.05)'
+                                : isAvailable ? 'transparent'
+                                : 'rgba(255,255,255,0.02)',
+                              color: isSelected ? '#a78bfa'
+                                : expired ? '#6b7280'
+                                : isAvailable ? 'var(--text-secondary)'
+                                : 'var(--text-muted)',
+                              cursor: isAvailable ? 'pointer' : 'not-allowed',
+                              fontWeight: isSelected ? 700 : 500,
+                              textDecoration: expired || !isAvailable ? 'line-through' : 'none',
+                              opacity: expired ? 0.55 : 1,
+                            }}
+                          >
+                            <span>{time}</span>
+                            {expired && (
+                              <span style={{ fontSize: '0.65rem', color: '#ef4444', background: 'rgba(239,68,68,0.12)', padding: '2px 6px', borderRadius: 4, fontWeight: 700, textDecoration: 'none' }}>EXPIRED</span>
+                            )}
+                            {!expired && !isAvailable && (
+                              <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Booked</span>
+                            )}
                           </button>
                         );
                       })}

@@ -4,23 +4,47 @@ import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import Sidebar from '@/components/Sidebar';
 
-const NEXT_3_DAYS = [
-  { date: '2026-02-27', label: 'Thursday, Feb 27' },
-  { date: '2026-02-28', label: 'Friday, Feb 28' },
-  { date: '2026-03-01', label: 'Saturday, Mar 1' },
-];
+// Always dynamic — never hardcode dates
+const NEXT_3_DAYS = (() => {
+  const days = [];
+  const today = new Date();
+  for (let i = 0; i < 3; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    days.push({
+      date: d.toISOString().split('T')[0],
+      label: d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }),
+    });
+  }
+  return days;
+})();
 const TIME_SLOTS = ['09:00 AM', '10:00 AM', '11:00 AM', '12:00 PM', '01:00 PM', '02:00 PM', '03:00 PM', '04:00 PM', '05:00 PM', '06:00 PM', '07:00 PM', '08:00 PM'];
+
+function isSlotExpired(date: string, time: string): boolean {
+  const now = new Date();
+  const today = now.toISOString().split('T')[0];
+  if (date < today) return true;
+  if (date > today) return false;
+  const [timePart, meridiem] = time.split(' ');
+  const [h, m] = timePart.split(':').map(Number);
+  let hour24 = h;
+  if (meridiem === 'PM' && h !== 12) hour24 = h + 12;
+  if (meridiem === 'AM' && h === 12) hour24 = 0;
+  const slotTime = new Date();
+  slotTime.setHours(hour24, m, 0, 0);
+  return now >= slotTime;
+}
 
 export default function AvailabilityPage() {
   const { user } = useAuth();
-  const [availability, setAvailability] = useState<Record<string, Set<string>>>({
-    '2026-02-27': new Set(['09:00 AM', '11:00 AM', '03:00 PM', '05:00 PM']),
-    '2026-02-28': new Set(['10:00 AM', '02:00 PM', '07:00 PM']),
-    '2026-03-01': new Set(['09:00 AM', '11:00 AM', '01:00 PM', '04:00 PM']),
-  });
+  const today = new Date().toISOString().split('T')[0];
+  const [availability, setAvailability] = useState<Record<string, Set<string>>>(
+    NEXT_3_DAYS.reduce((acc, { date }) => ({ ...acc, [date]: new Set<string>() }), {})
+  );
   const [saved, setSaved] = useState(false);
 
   const toggle = (date: string, time: string) => {
+    if (isSlotExpired(date, time)) return; // block expired
     setAvailability(prev => {
       const copy = { ...prev };
       const set = new Set(copy[date] || []);
@@ -54,14 +78,15 @@ export default function AvailabilityPage() {
           </div>
 
           {/* Legend */}
-          <div style={{ display: 'flex', gap: 20, marginBottom: 24, fontSize: '0.82rem' }}>
+          <div style={{ display: 'flex', gap: 20, marginBottom: 24, fontSize: '0.82rem', flexWrap: 'wrap' }}>
             {[
-              { color: 'rgba(16,185,129,0.4)', label: 'Available (click to toggle off)' },
-              { color: 'rgba(255,255,255,0.08)', label: 'Unavailable (click to mark available)' },
-              { color: 'rgba(239,68,68,0.3)', label: 'Already booked (cannot change)' },
-            ].map(({ color, label }) => (
+              { color: 'rgba(16,185,129,0.4)', border: 'rgba(16,185,129,0.5)', label: 'Available (click to toggle off)' },
+              { color: 'rgba(255,255,255,0.08)', border: 'rgba(255,255,255,0.15)', label: 'Unavailable (click to mark available)' },
+              { color: 'rgba(239,68,68,0.3)', border: 'rgba(239,68,68,0.4)', label: 'Already booked (cannot change)' },
+              { color: 'rgba(107,114,128,0.15)', border: 'rgba(239,68,68,0.25)', label: 'Expired — time has passed' },
+            ].map(({ color, border, label }) => (
               <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)' }}>
-                <div style={{ width: 16, height: 16, borderRadius: 4, background: color, border: '1px solid rgba(255,255,255,0.1)' }} />
+                <div style={{ width: 16, height: 16, borderRadius: 4, background: color, border: `1px solid ${border}` }} />
                 {label}
               </div>
             ))}
@@ -79,20 +104,36 @@ export default function AvailabilityPage() {
                 </div>
                 <div style={{ padding: '12px', background: 'var(--bg-secondary)', display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {TIME_SLOTS.map(time => {
-                    const isAvail = availability[date]?.has(time);
-                    const isBooked = (date === '2026-02-27' && time === '11:00 AM') || (date === '2026-02-28' && time === '02:00 PM');
+                    const expired = isSlotExpired(date, time);
+                    const isBooked = !expired && false; // connect to real bookings from DB if needed
+                    const isAvail = !expired && availability[date]?.has(time);
                     return (
-                      <button key={time} onClick={() => !isBooked && toggle(date, time)} disabled={isBooked} style={{
-                        padding: '10px 14px', borderRadius: 8, cursor: isBooked ? 'not-allowed' : 'pointer',
-                        border: `1px solid ${isBooked ? 'rgba(239,68,68,0.4)' : isAvail ? 'rgba(16,185,129,0.5)' : 'var(--border)'}`,
-                        background: isBooked ? 'rgba(239,68,68,0.12)' : isAvail ? 'rgba(16,185,129,0.12)' : 'rgba(255,255,255,0.02)',
-                        color: isBooked ? '#f87171' : isAvail ? '#34d399' : 'var(--text-muted)',
+                      <button key={time} onClick={() => !expired && !isBooked && toggle(date, time)} disabled={expired || isBooked} style={{
+                        padding: '10px 14px', borderRadius: 8,
+                        cursor: expired || isBooked ? 'not-allowed' : 'pointer',
+                        border: `1px solid ${
+                          isBooked ? 'rgba(239,68,68,0.4)'
+                          : expired ? 'rgba(239,68,68,0.2)'
+                          : isAvail ? 'rgba(16,185,129,0.5)'
+                          : 'var(--border)'
+                        }`,
+                        background: isBooked ? 'rgba(239,68,68,0.12)'
+                          : expired ? 'rgba(107,114,128,0.08)'
+                          : isAvail ? 'rgba(16,185,129,0.12)'
+                          : 'rgba(255,255,255,0.02)',
+                        color: isBooked ? '#f87171'
+                          : expired ? '#4b5563'
+                          : isAvail ? '#34d399'
+                          : 'var(--text-muted)',
                         fontSize: '0.82rem', fontWeight: isAvail ? 600 : 400, transition: 'all 0.15s',
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        opacity: expired ? 0.5 : 1,
+                        textDecoration: expired ? 'line-through' : 'none',
                       }}>
                         <span>{time}</span>
-                        {isBooked && <span style={{ fontSize: '0.7rem' }}>BOOKED</span>}
-                        {!isBooked && isAvail && <span style={{ fontSize: '0.7rem' }}>✓</span>}
+                        {expired && <span style={{ fontSize: '0.65rem', color: '#ef4444', textDecoration: 'none', background: 'rgba(239,68,68,0.1)', padding: '1px 5px', borderRadius: 3 }}>EXPIRED</span>}
+                        {isBooked && !expired && <span style={{ fontSize: '0.7rem' }}>BOOKED</span>}
+                        {!isBooked && !expired && isAvail && <span style={{ fontSize: '0.7rem' }}>✓</span>}
                       </button>
                     );
                   })}
