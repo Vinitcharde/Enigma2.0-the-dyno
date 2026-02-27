@@ -18,12 +18,12 @@ export default function RegisterPage() {
     if (step === 1) { setStep(2); return; }
     setError('');
     if (form.password.length < 6) { setError('Password must be at least 6 characters.'); return; }
-    const ok = await register({ ...form, role });
-    if (ok) {
+    const result = await register({ ...form, role });
+    if (result.ok) {
       if (role === 'student') router.push('/dashboard');
       else router.push('/expert/dashboard');
     } else {
-      setError('Registration failed. Please try again.');
+      setError(result.error || 'Registration failed. Please try again.');
     }
   };
 

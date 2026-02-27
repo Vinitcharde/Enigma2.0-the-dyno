@@ -144,10 +144,14 @@ export async function POST(req: NextRequest) {
       }
       case 'register': {
         const { id, email, password, name, role, college, company } = body;
+        if (!email || !password || !name || !role) {
+          return NextResponse.json({ error: 'Missing required fields (name, email, password, role).' }, { status: 400 });
+        }
         const existing = await findUserByEmail(email);
-        if (existing) return NextResponse.json({ error: 'Email already registered' }, { status: 409 });
+        if (existing) return NextResponse.json({ error: 'Email already registered. Please sign in instead.' }, { status: 409 });
         await createUser({ id, email, password, name, role, college, company });
         const created = await findUserByEmail(email);
+        if (!created) return NextResponse.json({ error: 'Account created but could not retrieve user. Please try logging in.' }, { status: 500 });
         return NextResponse.json(mapUserForFrontend(created));
       }
       case 'updateProfile': {

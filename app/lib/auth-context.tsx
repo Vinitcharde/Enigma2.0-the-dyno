@@ -25,7 +25,7 @@ export interface User {
 interface AuthContextType {
   user: User | null;
   login: (email: string, password: string, role?: UserRole) => Promise<boolean>;
-  register: (data: RegisterData) => Promise<boolean>;
+  register: (data: RegisterData) => Promise<{ ok: boolean; error?: string }>;
   logout: () => void;
   updateProfile: (data: Partial<User>) => void;
   isLoading: boolean;
@@ -105,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const register = async (data: RegisterData): Promise<boolean> => {
+  const register = async (data: RegisterData): Promise<{ ok: boolean; error?: string }> => {
     setIsLoading(true);
     try {
       const res = await dbFetch('register', {
@@ -117,19 +117,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         college: data.college,
         company: data.company,
       });
-      if (!res.ok) { setIsLoading(false); return false; }
-      const created = await res.json();
+      const body = await res.json();
+      if (!res.ok) {
+        setIsLoading(false);
+        return { ok: false, error: body?.error || 'Registration failed. Please try again.' };
+      }
+      if (!body || !body.id) {
+        setIsLoading(false);
+        return { ok: false, error: 'Registration failed. Please try again.' };
+      }
       const mapped: User = {
-        id: created.id, email: created.email, name: created.name, role: created.role,
-        college: created.college, company: created.company, skills: [],
+        id: body.id, email: body.email, name: body.name, role: body.role,
+        college: body.college, company: body.company, skills: [],
       };
       setUser(mapped);
       localStorage.setItem('placeai_user', JSON.stringify(mapped));
       setIsLoading(false);
-      return true;
-    } catch {
+      return { ok: true };
+    } catch (err: any) {
       setIsLoading(false);
-      return false;
+      return { ok: false, error: err?.message || 'Network error. Please check your connection.' };
     }
   };
 

@@ -156,6 +156,18 @@ export default function QuizPage() {
     }
   }, [answers, questions, TOTAL_TIME, timeLeft, section, user]);
 
+  // Anti-cheat: auto-submit on tab/window switch
+  useEffect(() => {
+    if (!started || submitted) return;
+    const handler = () => {
+      if (document.hidden) {
+        handleSubmit();
+      }
+    };
+    document.addEventListener('visibilitychange', handler);
+    return () => document.removeEventListener('visibilitychange', handler);
+  }, [started, submitted, handleSubmit]);
+
   const formatTime = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
   const score = questions.length > 0 ? answers.filter((a, i) => a === questions[i]?.answer).length : 0;
@@ -216,6 +228,7 @@ export default function QuizPage() {
               <li>You can flag questions to review later</li>
               <li>Click Submit Quiz when done</li>
               <li>Results shown immediately after submission</li>
+              <li style={{ color: '#f87171', fontWeight: 600 }}>⚠ Switching tabs or windows will auto-submit your quiz</li>
             </ul>
           </div>
           {loadError && (

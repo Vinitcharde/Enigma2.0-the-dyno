@@ -6,7 +6,7 @@ import { useAuth } from '@/lib/auth-context';
 import dynamic from 'next/dynamic';
 import {
   Brain, Mic, MicOff, Play, Square, Send, Maximize,
-  Clock, Lightbulb, MessageSquare
+  Clock, Lightbulb, MessageSquare, Zap, ChevronDown
 } from 'lucide-react';
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), {
@@ -27,31 +27,135 @@ interface Question {
   codeStarter: string;
 }
 
+interface RunResult {
+  isCorrect: boolean;
+  passedCases: number;
+  totalCases: number;
+  testResults: { input: string; expected: string; actual: string; passed: boolean }[];
+  errorMessage: string;
+  runtime: string;
+  memory: string;
+  verdict: string;
+  wrongReason: string;
+}
+
+interface AISolution {
+  code: string;
+  timeComplexity: string;
+  spaceComplexity: string;
+  approach: string;
+  keyInsight: string;
+}
+
+interface ComplexityResult {
+  timeComplexity: string;
+  spaceComplexity: string;
+  timeExplanation: string;
+  spaceExplanation: string;
+  codeQuality: number;
+  correctness: number;
+  optimizationScore: number;
+  feedback: string;
+  suggestion: string;
+  isOptimal: boolean;
+}
+
+// ─── All supported languages with Monaco IDs and display names ───────────────
+const LANG_META: Record<string, { monacoId: string; label: string; color: string }> = {
+  python:     { monacoId: 'python',     label: 'Python',     color: '#3b82f6' },
+  javascript: { monacoId: 'javascript', label: 'JavaScript', color: '#f59e0b' },
+  typescript: { monacoId: 'typescript', label: 'TypeScript', color: '#3b82f6' },
+  java:       { monacoId: 'java',       label: 'Java',       color: '#f87171' },
+  cpp:        { monacoId: 'cpp',        label: 'C++',        color: '#a78bfa' },
+  go:         { monacoId: 'go',         label: 'Go',         color: '#22d3ee' },
+  rust:       { monacoId: 'rust',       label: 'Rust',       color: '#f97316' },
+  swift:      { monacoId: 'swift',      label: 'Swift',      color: '#f87171' },
+  kotlin:     { monacoId: 'kotlin',     label: 'Kotlin',     color: '#a78bfa' },
+  dart:       { monacoId: 'dart',       label: 'Dart',       color: '#22d3ee' },
+  csharp:     { monacoId: 'csharp',     label: 'C#',         color: '#34d399' },
+  r:          { monacoId: 'r',          label: 'R',          color: '#60a5fa' },
+  sql:        { monacoId: 'sql',        label: 'SQL',        color: '#fbbf24' },
+  bash:       { monacoId: 'shell',      label: 'Bash',       color: '#34d399' },
+  solidity:   { monacoId: 'sol',        label: 'Solidity',   color: '#a78bfa' },
+  c:          { monacoId: 'c',          label: 'C',          color: '#94a3b8' },
+  scala:      { monacoId: 'scala',      label: 'Scala',      color: '#f87171' },
+};
+
+// Per-role preferred languages (first = default)
+const ROLE_LANGS: Record<string, string[]> = {
+  'Full Stack Developer':       ['javascript', 'typescript', 'python', 'java', 'cpp'],
+  'Frontend Developer':         ['javascript', 'typescript', 'cpp', 'python'],
+  'Backend Engineer':           ['python', 'java', 'go', 'cpp', 'javascript'],
+  'Mobile Developer':           ['swift', 'kotlin', 'dart', 'java'],
+  'Data Scientist':             ['python', 'r', 'sql', 'cpp'],
+  'ML Engineer':                ['python', 'cpp', 'bash', 'r'],
+  'Data Engineer':              ['python', 'sql', 'scala', 'java'],
+  'AI / NLP Engineer':          ['python', 'cpp', 'bash'],
+  'DevOps Engineer':            ['bash', 'python', 'go'],
+  'Cloud Architect':            ['bash', 'python', 'go'],
+  'Site Reliability Engineer':  ['go', 'python', 'bash'],
+  'Security Engineer':          ['python', 'c', 'bash'],
+  'Penetration Tester':         ['python', 'bash'],
+  'Blockchain Developer':       ['solidity', 'javascript', 'rust'],
+  'Game Developer':             ['cpp', 'csharp', 'python'],
+  'Embedded Systems':           ['c', 'cpp'],
+  'Product Manager':            ['python', 'sql'],
+  'Business Analyst':           ['sql', 'python'],
+};
+
+const DEFAULT_LANGS = ['python', 'javascript', 'java', 'cpp', 'go'];
+
+// ─── Code starters per language ──────────────────────────────────────────────
 const CODE_STARTERS: Record<string, string> = {
-  python: `# Write your solution here\ndef solution():\n    # Your code here\n    pass\n\nif __name__ == "__main__":\n    solution()\n`,
-  javascript: `// Write your solution here\nfunction solution() {\n  // Your code here\n}\n\nconsole.log(solution());\n`,
-  java: `import java.util.*;\n\npublic class Solution {\n    public static void main(String[] args) {\n        Solution sol = new Solution();\n    }\n    public void solve() {\n        // Your code here\n    }\n}\n`,
-  cpp: `#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    // Your solution here\n    return 0;\n}\n`,
+  python:     `# Write your solution here\ndef solution():\n    # Your code here\n    pass\n\nif __name__ == "__main__":\n    solution()\n`,
+  javascript: `// Write your solution here\nfunction solution() {\n  // Your code here\n}\nconsole.log(solution());\n`,
+  typescript: `// Write your solution here\nfunction solution(): void {\n  // Your code here\n}\nsolution();\n`,
+  java:       `import java.util.*;\n\npublic class Solution {\n    public static void main(String[] args) {\n        Solution sol = new Solution();\n    }\n    public void solve() {\n        // Your code here\n    }\n}\n`,
+  cpp:        `#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    // Your solution here\n    return 0;\n}\n`,
+  go:         `package main\nimport "fmt"\n\nfunc solution() {\n    // Your code here\n    fmt.Println("result")\n}\n\nfunc main() {\n    solution()\n}\n`,
+  rust:       `fn solution() {\n    // Your code here\n}\n\nfn main() {\n    solution();\n}\n`,
+  swift:      `import Foundation\n\nfunc solution() {\n    // Your code here\n}\n\nsolution()\n`,
+  kotlin:     `fun solution() {\n    // Your code here\n}\n\nfun main() {\n    solution()\n}\n`,
+  dart:       `void solution() {\n  // Your code here\n}\n\nvoid main() {\n  solution();\n}\n`,
+  csharp:     `using System;\n\nclass Solution {\n    static void Main() {\n        // Your code here\n    }\n}\n`,
+  r:          `# Write your solution here\nsolution <- function() {\n  # Your code here\n}\n\nsolution()\n`,
+  sql:        `-- Write your SQL query here\nSELECT *\nFROM your_table\nWHERE condition;\n`,
+  bash:       `#!/bin/bash\n# Write your solution here\n\nsolution() {\n    # Your code here\n    echo "result"\n}\n\nsolution\n`,
+  solidity:   `// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\n\ncontract Solution {\n    // Your contract here\n    function solve() public {\n        // Your code here\n    }\n}\n`,
+  c:          `#include <stdio.h>\n\nvoid solution() {\n    // Your code here\n}\n\nint main() {\n    solution();\n    return 0;\n}\n`,
+  scala:      `object Solution extends App {\n  def solution(): Unit = {\n    // Your code here\n  }\n\n  solution()\n}\n`,
 };
 
 function InterviewSessionContent() {
   const { user } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const role = searchParams.get('role') || user?.targetRole || 'Full Stack Developer';
-  const type = (searchParams.get('type') || 'full') as 'full' | 'dsa' | 'behavioral' | 'hr';
+  // Support both ?roles=A,B,C (new) and legacy ?role=A
+  const rolesRaw = searchParams.get('roles') || searchParams.get('role') || user?.targetRole || 'Full Stack Developer';
+  const roles = rolesRaw.split(',').map(r => decodeURIComponent(r.trim())).filter(Boolean);
+  const role = roles[0]; // primary role for display / legacy compat
+  const type = (searchParams.get('type') || 'full') as 'full' | 'dsa' | 'behavioral' | 'system_design';
   const difficulty = searchParams.get('difficulty') || 'medium';
+
+  // Build available languages from all selected roles, deduplicated, primary role first
+  const availableLangs = Array.from(new Set(
+    roles.flatMap(r => ROLE_LANGS[r] || DEFAULT_LANGS)
+  ));
+  const defaultLang = availableLangs[0] || 'python';
 
   const [phase, setPhase] = useState<Phase>('loading');
   const [questions, setQuestions] = useState<Question[]>([]);
-  const [loadingMsg, setLoadingMsg] = useState('Connecting to Gemini AI...');
+  const [loadingMsg, setLoadingMsg] = useState('Connecting to AI...');
   const [usedAI, setUsedAI] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentQIdx, setCurrentQIdx] = useState(0);
-  const [code, setCode] = useState(CODE_STARTERS.python);
-  const [language, setLanguage] = useState('python');
+  const [code, setCode] = useState(CODE_STARTERS[defaultLang] || CODE_STARTERS.python);
+  const [language, setLanguage] = useState(defaultLang);
   const [output, setOutput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [complexityResult, setComplexityResult] = useState<ComplexityResult | null>(null);
+  const [showLangDropdown, setShowLangDropdown] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [userInput, setUserInput] = useState('');
@@ -62,11 +166,24 @@ function InterviewSessionContent() {
   const [aiTyping, setAiTyping] = useState(false);
   const [scores, setScores] = useState({ technical: 0, problemSolving: 0, communication: 0, optimization: 0 });
   const [showHint, setShowHint] = useState(false);
+  const [wrongRunCount, setWrongRunCount] = useState(0);
+  const [aiSolution, setAiSolution] = useState<AISolution | null>(null);
+  const [isFetchingSolution, setIsFetchingSolution] = useState(false);
+  const [runResult, setRunResult] = useState<RunResult | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+  const autoSubmittedRef = useRef(false);
 
   const currentQ = questions[currentQIdx] || null;
   const skills = user?.skills || [];
+
+  // Reset wrong run counter and AI solution whenever the question changes
+  useEffect(() => {
+    setWrongRunCount(0);
+    setAiSolution(null);
+    setRunResult(null);
+    setOutput('');
+  }, [currentQIdx]);
 
   // Fetch Gemini questions on mount
   useEffect(() => {
@@ -76,7 +193,7 @@ function InterviewSessionContent() {
     fetch('/api/generate-questions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ skills, role, interviewType: type, difficulty, userName: user?.name }),
+      body: JSON.stringify({ skills, roles, role, interviewType: type, difficulty, userName: user?.name }),
     })
       .then(r => r.json())
       .then(data => {
@@ -93,15 +210,25 @@ function InterviewSessionContent() {
     return () => clearInterval(t);
   }, [phase]);
 
-  // Anti-cheat
+  // Anti-cheat: auto-submit on first tab/window switch
   useEffect(() => {
     const handler = () => {
       if (document.hidden && !['loading', 'intro', 'complete'].includes(phase)) {
-        setTabSwitches(t => { const n = t + 1; setShowWarning(true); setTimeout(() => setShowWarning(false), 4000); return n; });
+        const newCount = tabSwitches + 1;
+        setTabSwitches(newCount);
+        setShowWarning(true);
+        if (!autoSubmittedRef.current) {
+          autoSubmittedRef.current = true;
+          // Show banner briefly then auto-finalize
+          setTimeout(() => {
+            finalizeSession();
+          }, 2000);
+        }
       }
     };
     document.addEventListener('visibilitychange', handler);
-  }, [phase]);
+    return () => document.removeEventListener('visibilitychange', handler);
+  }, [phase, tabSwitches]);
 
   // Cleanup speech on unmount
   useEffect(() => {
@@ -134,7 +261,7 @@ function InterviewSessionContent() {
   const startSession = () => {
     setShowFullscreenPrompt(false);
     document.documentElement.requestFullscreen?.().catch(() => { });
-    setPhase(type === 'hr' ? 'voice' : 'coding');
+    setPhase(type === 'system_design' ? 'voice' : 'coding');
     setAiTyping(true);
     const q = questions[0];
     const skillMention = skills.length > 0 ? ` I can see from your resume that you have experience with ${skills.slice(0, 3).join(', ')} — I'll tailor my questions accordingly.` : '';
@@ -156,17 +283,130 @@ function InterviewSessionContent() {
     }, 1500);
   };
 
+  const changeLanguage = (lang: string) => {
+    setLanguage(lang);
+    setShowLangDropdown(false);
+    setComplexityResult(null);
+    setOutput('');
+    // Always switch to the new language's template so Monaco and the code stay in sync
+    setCode(CODE_STARTERS[lang] || CODE_STARTERS.python);
+  };
+
+  const getOptimalSolution = async () => {
+    if (!currentQ) return;
+    setIsFetchingSolution(true);
+    setOutput('🤖 AI is generating the optimal solution…');
+    try {
+      const res = await fetch('/api/optimal-solution', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: currentQ.question, language, role }),
+      });
+      const data = await res.json();
+      if (data.success && data.code) {
+        const solutionCode = data.code.replace(/\\n/g, '\n');
+        setAiSolution(data);
+        setCode(solutionCode);
+        setOutput('');
+        setScores(s => ({ ...s, technical: Math.min(100, s.technical + 5), optimization: Math.min(100, s.optimization + 5) }));
+      } else {
+        setOutput('❌ Could not generate optimal solution. Check your API key.');
+      }
+    } catch {
+      setOutput('❌ Network error while fetching optimal solution.');
+    } finally {
+      setIsFetchingSolution(false);
+    }
+  };
+
   const runCode = async () => {
-    setIsRunning(true); setOutput('Running code...');
-    await new Promise(r => setTimeout(r, 1500));
-    const results = [
-      '✓ Test case 1 passed\n✓ Test case 2 passed\n✓ Test case 3 passed\n\nAll tests passed • Runtime: 47ms • Memory: 14.2 MB',
-      '✓ Test case 1 passed\n✗ Test case 2 failed: Wrong output\n\n1/2 tests passed • Runtime: 63ms',
-      '✓ 5/5 test cases passed\n\nRuntime: 32ms (beats 89.4%)\nMemory: 12.8 MB (beats 76.2%)',
-    ];
-    setOutput(results[Math.floor(Math.random() * results.length)]);
-    setIsRunning(false);
-    setScores(s => ({ ...s, technical: Math.min(100, s.technical + 12) }));
+    const isBlank =
+      !code.trim() ||
+      code.trim() === (CODE_STARTERS[language] || CODE_STARTERS.python).trim();
+
+    if (isBlank) {
+      setOutput('⚠️ Please write your solution before running.');
+      return;
+    }
+
+    setIsRunning(true);
+    setRunResult(null);
+    setOutput('⏳ Running your code against test cases…');
+
+    try {
+      const res = await fetch('/api/run-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, language, question: currentQ?.question || '', role }),
+      });
+      const data: RunResult & { success: boolean; error?: string } = await res.json();
+
+      if (!data.success) {
+        setOutput(`❌ ${data.error || 'Evaluation failed. Check your API key.'}`);
+        setIsRunning(false);
+        return;
+      }
+
+      setRunResult(data);
+      setOutput(''); // clear — the card below renders the details
+
+      if (data.isCorrect) {
+        // Correct — reward score, reset wrong counter
+        setWrongRunCount(0);
+        setAiSolution(null);
+        setScores(s => ({
+          ...s,
+          technical: Math.min(100, s.technical + 18),
+          problemSolving: Math.min(100, s.problemSolving + 10),
+        }));
+      } else {
+        // Wrong — increment counter; after 2 failures provide optimal AI solution
+        const newCount = wrongRunCount + 1;
+        setWrongRunCount(newCount);
+        setScores(s => ({ ...s, technical: Math.max(0, s.technical - 3) }));
+        if (newCount >= 2 && !aiSolution) {
+          await getOptimalSolution();
+        }
+      }
+    } catch {
+      setOutput('❌ Could not run code. Check your API key.');
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
+  const analyzeComplexity = async () => {
+    if (!code.trim() || code === (CODE_STARTERS[language] || CODE_STARTERS.python)) {
+      setOutput('⚠️ Please write some code before analyzing complexity.');
+      return;
+    }
+    setIsAnalyzing(true);
+    setComplexityResult(null);
+    try {
+      const res = await fetch('/api/evaluate-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code,
+          language,
+          question: currentQ?.question || '',
+          role,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setComplexityResult(data);
+        setScores(s => ({
+          ...s,
+          technical: Math.min(100, Math.round((s.technical + data.codeQuality) / 2)),
+          optimization: Math.min(100, Math.round((s.optimization + data.optimizationScore) / 2)),
+        }));
+      }
+    } catch {
+      setOutput('❌ Could not analyze complexity. Check your API key.');
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const toggleVoice = () => {
@@ -185,27 +425,11 @@ function InterviewSessionContent() {
     addMessage('user', text);
     setTranscript(''); setUserInput('');
     setAiTyping(true);
-    setScores(s => {
-      let newScores = { ...s };
-      if (type === 'hr') {
-        const words = text.split(/\s+/).length;
-        const sentences = text.match(/[^.!?]+[.!?]+/g)?.length || 1;
-        const avgWords = words / sentences;
-        const sentScore = (avgWords >= 8 && avgWords <= 25) ? 100 : (avgWords < 8 ? 60 : 70);
-
-        const keywords = ['team', 'leadership', 'challenge', 'collaboration', 'agile', 'conflict', 'resolved', 'goal', 'achieved', 'communication', 'manager', 'driven', 'impact', 'strategy', 'aligned'];
-        const matched = keywords.filter(k => text.toLowerCase().includes(k)).length;
-        const keyScore = Math.min(100, matched * 20 + 40);
-
-        newScores.technical = Math.min(100, Math.round((s.technical * currentQIdx + sentScore) / (currentQIdx + 1))); // Structure
-        newScores.problemSolving = Math.min(100, Math.round((s.problemSolving * currentQIdx + keyScore) / (currentQIdx + 1))); // Keywords
-        newScores.communication = Math.min(100, s.communication + 15);
-      } else {
-        newScores.communication = Math.min(100, s.communication + 15);
-        newScores.problemSolving = Math.min(100, s.problemSolving + 10);
-      }
-      return newScores;
-    });
+    setScores(s => ({
+      ...s,
+      communication: Math.min(100, s.communication + 15),
+      problemSolving: Math.min(100, s.problemSolving + 10),
+    }));
     await new Promise(r => setTimeout(r, 1800));
     setAiTyping(false);
     const q = questions[currentQIdx];
@@ -236,37 +460,55 @@ function InterviewSessionContent() {
 
   const finalizeSession = async () => {
     setAiTyping(true);
-    await new Promise(r => setTimeout(r, 2000));
-    setAiTyping(false);
+    await new Promise(r => setTimeout(r, 800));
 
-    let finalScores;
-    if (type === 'hr') {
-      const userTexts = messages.filter(m => m.role === 'user').map(m => m.content).join(' ');
-      const words = userTexts.split(/\s+/).length || 1;
-      const sentences = userTexts.match(/[^.!?]+[.!?]+/g)?.length || 1;
-      const avgWords = words / sentences;
-      const sentenceScore = (avgWords >= 8 && avgWords <= 25) ? (85 + Math.floor(Math.random() * 10)) : (60 + Math.floor(Math.random() * 20));
+    // ── Real AI evaluation ─────────────────────────────────────────────────────
+    const hasCode =
+      code.trim().length > 20 &&
+      code.trim() !== (CODE_STARTERS[language] || CODE_STARTERS.python).trim();
 
-      const keywords = ['team', 'leadership', 'challenge', 'collaboration', 'agile', 'conflict', 'resolved', 'goal', 'achieved', 'communication', 'manager', 'impact', 'strategy', 'aligned'];
-      const matched = keywords.filter(k => userTexts.toLowerCase().includes(k)).length;
-      const keywordScore = Math.min(100, matched * 15 + 40);
+    let aiTechnical = scores.technical > 0 ? scores.technical : null;
+    let aiOptimization = scores.optimization > 0 ? scores.optimization : null;
+    let aiCorrectness: number | null = null;
 
-      finalScores = {
-        technical: sentenceScore,
-        problemSolving: keywordScore,
-        communication: 75 + Math.floor(Math.random() * 18),
-        optimization: 70 + Math.floor(Math.random() * 20),
-      };
-    } else {
-      finalScores = {
-        technical: 72 + Math.floor(Math.random() * 20),
-        problemSolving: 68 + Math.floor(Math.random() * 22),
-        communication: 75 + Math.floor(Math.random() * 18),
-        optimization: 65 + Math.floor(Math.random() * 25),
-      };
+    if (hasCode) {
+      try {
+        const res = await fetch('/api/evaluate-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code,
+            language,
+            question: questions.map(q => q.question).join('\n\n'),
+            role,
+          }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          aiTechnical   = data.codeQuality;
+          aiOptimization = data.optimizationScore;
+          aiCorrectness  = data.correctness;
+          setComplexityResult(data);
+        }
+      } catch { /* fall through */ }
     }
 
+    // ── Derive final scores from real data ────────────────────────────────────
+    const answersGiven = messages.filter(m => m.role === 'user').length;
+    const commScore    = scores.communication  > 0 ? scores.communication  : Math.min(85, 45 + answersGiven * 10);
+    const psScore      = scores.problemSolving > 0 ? scores.problemSolving  : Math.min(80, 40 + answersGiven * 8);
+    const techScore    = aiTechnical   ?? (hasCode ? 55 : 30);
+    const optScore     = aiOptimization ?? (hasCode ? 50 : 28);
+
+    const finalScores = {
+      technical:      techScore,
+      problemSolving: psScore + (aiCorrectness != null ? Math.round(aiCorrectness * 0.1) : 0),
+      communication:  commScore,
+      optimization:   optScore,
+    };
+
     setScores(finalScores);
+    setAiTyping(false);
     const overall = Math.round(finalScores.technical * 0.4 + finalScores.problemSolving * 0.25 + finalScores.communication * 0.2 + finalScores.optimization * 0.15);
 
     // Save session to DB
@@ -279,7 +521,8 @@ function InterviewSessionContent() {
           session: {
             userEmail: user.email,
             userName: user.name,
-            jobRole: role,
+            jobRoles: roles,
+            jobRole: roles.join(', '),
             interviewType: type,
             difficulty,
             questions: questions.map(q => q.question),
@@ -299,10 +542,10 @@ function InterviewSessionContent() {
       `🎉 **Interview Complete!**`,
       ``,
       `**Overall Score: ${overall}/100**`,
-      `• ${type === 'hr' ? 'Sentence Structure' : 'Technical'} (40%): ${finalScores.technical}%`,
-      `• ${type === 'hr' ? 'Keyword Match' : 'Problem Solving'} (25%): ${finalScores.problemSolving}%`,
-      `• ${type === 'hr' ? 'Confidence' : 'Communication'} (20%): ${finalScores.communication}%`,
-      `• ${type === 'hr' ? 'Relevance' : 'Optimization'} (15%): ${finalScores.optimization}%`,
+      `• Technical (40%): ${finalScores.technical}%`,
+      `• Problem Solving (25%): ${finalScores.problemSolving}%`,
+      `• Communication (20%): ${finalScores.communication}%`,
+      `• Optimization (15%): ${finalScores.optimization}%`,
       ``,
       `📌 **Key Observations:**`,
       `• ${skills.length > 0 ? `Good coverage of ${skills.slice(0, 2).join(' and ')} concepts` : 'Solid foundational knowledge'}`,
@@ -344,7 +587,7 @@ function InterviewSessionContent() {
       </div>
       <h1 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'white', marginBottom: 12 }}>AI Interview Session</h1>
       <p style={{ color: 'var(--text-secondary)', maxWidth: 520, lineHeight: 1.7, marginBottom: 8 }}>
-        Role: <strong style={{ color: '#a78bfa' }}>{role}</strong> • Type: <strong style={{ color: '#22d3ee' }}>{type}</strong> • Difficulty: <strong style={{ color: ({ easy: '#34d399', medium: '#fbbf24', hard: '#f87171' } as any)[difficulty] }}>{difficulty}</strong>
+        Roles: <strong style={{ color: '#a78bfa' }}>{roles.join(', ')}</strong> • Type: <strong style={{ color: '#22d3ee' }}>{type}</strong> • Difficulty: <strong style={{ color: ({ easy: '#34d399', medium: '#fbbf24', hard: '#f87171' } as any)[difficulty] }}>{difficulty}</strong>
       </p>
       {usedAI && skills.length > 0 && (
         <div style={{ padding: '8px 18px', borderRadius: 20, background: 'rgba(124,58,237,0.15)', border: '1px solid rgba(124,58,237,0.35)', color: '#a78bfa', fontSize: '0.82rem', fontWeight: 600, marginBottom: 16 }}>
@@ -365,28 +608,85 @@ function InterviewSessionContent() {
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-primary)', overflow: 'hidden' }}>
-      {showWarning && <div className="warning-banner">⚠️ Tab switch detected ({tabSwitches}). {tabSwitches >= 3 ? 'Session flagged!' : `${3 - tabSwitches} more will flag.`}</div>}
+      {showWarning && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999, background: 'rgba(239,68,68,0.95)', color: 'white', padding: '14px 24px', fontWeight: 700, textAlign: 'center', fontSize: '0.95rem' }}>
+          🚨 Tab switch detected! Your session is being AUTO-SUBMITTED due to anti-cheat policy.
+        </div>
+      )}
 
       {/* Top bar */}
-      <div style={{ padding: '12px 24px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ padding: '10px 20px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0, gap: 12 }}>
+        {/* Left: branding + roles */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minWidth: 0 }}>
           <div className="pulse-dot" />
-          <span style={{ fontWeight: 700, color: 'white', fontSize: '0.9rem' }}>AI Interview</span>
-          <span className="badge badge-purple" style={{ fontSize: '0.72rem' }}>{role}</span>
-          {usedAI && <span style={{ padding: '2px 8px', borderRadius: 10, background: 'rgba(124,58,237,0.2)', border: '1px solid rgba(124,58,237,0.35)', color: '#a78bfa', fontSize: '0.7rem', fontWeight: 700 }}>✨ Gemini</span>}
-          {tabSwitches > 0 && <span className="badge badge-red" style={{ fontSize: '0.7rem' }}>⚠ {tabSwitches} warnings</span>}
+          <span style={{ fontWeight: 700, color: 'white', fontSize: '0.88rem', whiteSpace: 'nowrap' }}>AI Interview</span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {roles.map((r, i) => <span key={i} className="badge badge-purple" style={{ fontSize: '0.68rem' }}>{r}</span>)}
+          </div>
+          {usedAI && <span style={{ padding: '2px 8px', borderRadius: 10, background: 'rgba(124,58,237,0.2)', border: '1px solid rgba(124,58,237,0.35)', color: '#a78bfa', fontSize: '0.68rem', fontWeight: 700, whiteSpace: 'nowrap' }}>✨ AI</span>}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-          <span style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-            <Clock size={13} style={{ display: 'inline', marginRight: 4 }} />{formatTime(sessionTime)}
+
+        {/* Centre: Language selector (only shown for coding phases) */}
+        {(phase === 'coding' || phase === 'followup' || phase === 'voice') && type !== 'system_design' && (
+          <div style={{ position: 'relative', flexShrink: 0 }}>
+            <button
+              onClick={() => setShowLangDropdown(v => !v)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '7px 14px', borderRadius: 8,
+                background: `${LANG_META[language]?.color || '#a78bfa'}18`,
+                border: `1px solid ${LANG_META[language]?.color || '#a78bfa'}50`,
+                color: LANG_META[language]?.color || '#a78bfa',
+                cursor: 'pointer', fontSize: '0.82rem', fontWeight: 700, whiteSpace: 'nowrap',
+              }}
+            >
+              💻 {LANG_META[language]?.label || language}
+              <ChevronDown size={13} />
+            </button>
+            {showLangDropdown && (
+              <div style={{
+                position: 'absolute', top: '110%', left: '50%', transform: 'translateX(-50%)',
+                background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12,
+                padding: 8, zIndex: 1000, minWidth: 200,
+                boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+                display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4,
+              }}>
+                {availableLangs.map(lang => {
+                  const m = LANG_META[lang];
+                  if (!m) return null;
+                  return (
+                    <button
+                      key={lang}
+                      onClick={() => changeLanguage(lang)}
+                      style={{
+                        padding: '8px 12px', borderRadius: 8, cursor: 'pointer', textAlign: 'left', fontSize: '0.8rem', fontWeight: 600,
+                        background: language === lang ? `${m.color}20` : 'transparent',
+                        border: `1px solid ${language === lang ? m.color : 'transparent'}`,
+                        color: language === lang ? m.color : 'var(--text-secondary)',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      {m.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Right: timer + controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
+          <span style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--text-secondary)', fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
+            <Clock size={12} style={{ display: 'inline', marginRight: 4 }} />{formatTime(sessionTime)}
           </span>
-          <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Q {currentQIdx + 1}/{questions.length}</span>
-          {phase !== 'complete' && <button className="btn-ghost" onClick={finalizeSession} style={{ padding: '6px 14px', fontSize: '0.8rem' }}>End Session</button>}
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Q {currentQIdx + 1}/{questions.length}</span>
+          {tabSwitches > 0 && <span className="badge badge-red" style={{ fontSize: '0.68rem' }}>⚠ {tabSwitches}</span>}
+          {phase !== 'complete' && <button className="btn-ghost" onClick={finalizeSession} style={{ padding: '5px 12px', fontSize: '0.78rem', whiteSpace: 'nowrap' }}>End Session</button>}
         </div>
       </div>
 
       {/* Main layout */}
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: type === 'hr' && phase !== 'complete' ? '1fr' : '390px 1fr', overflow: 'hidden' }}>
+        <div style={{ flex: 1, display: 'grid', gridTemplateColumns: type === 'system_design' && phase !== 'complete' ? '1fr' : '390px 1fr', overflow: 'hidden' }}>
         {/* Left: AI Chat */}
         <div style={{ borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--bg-secondary)' }}>
           <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -471,7 +771,7 @@ function InterviewSessionContent() {
         </div>
 
         {/* Right: Code editor / Results */}
-        <div style={{ display: type === 'hr' && phase !== 'complete' ? 'none' : 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ display: type === 'system_design' && phase !== 'complete' ? 'none' : 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {phase === 'complete' ? (
             <div style={{ flex: 1, overflowY: 'auto', padding: '36px' }}>
               <div style={{ maxWidth: 680, margin: '0 auto' }}>
@@ -491,10 +791,10 @@ function InterviewSessionContent() {
                 <div className="card-no-hover" style={{ padding: 24, marginBottom: 20 }}>
                   <h3 style={{ fontWeight: 700, color: 'white', marginBottom: 18, fontSize: '0.95rem' }}>Score Breakdown</h3>
                   {[
-                    { label: type === 'hr' ? 'Sentence Structure' : 'Technical', score: scores.technical, weight: '40%', color: '#a78bfa' },
-                    { label: type === 'hr' ? 'Keyword Match' : 'Problem Solving', score: scores.problemSolving, weight: '25%', color: '#22d3ee' },
-                    { label: type === 'hr' ? 'Confidence' : 'Communication', score: scores.communication, weight: '20%', color: '#34d399' },
-                    { label: type === 'hr' ? 'Relevance' : 'Optimization', score: scores.optimization, weight: '15%', color: '#f59e0b' },
+                    { label: 'Technical', score: scores.technical, weight: '40%', color: '#a78bfa' },
+                    { label: 'Problem Solving', score: scores.problemSolving, weight: '25%', color: '#22d3ee' },
+                    { label: 'Communication', score: scores.communication, weight: '20%', color: '#34d399' },
+                    { label: 'Optimization', score: scores.optimization, weight: '15%', color: '#f59e0b' },
                   ].map(({ label, score, weight, color }) => (
                     <div key={label} style={{ marginBottom: 16 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: '0.85rem' }}>
@@ -513,45 +813,127 @@ function InterviewSessionContent() {
             </div>
           ) : (
             <>
-              <div style={{ padding: '12px 18px', background: 'var(--bg-card)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  {(['python', 'javascript', 'java', 'cpp'] as const).map(lang => (
-                    <button key={lang} onClick={() => { setLanguage(lang); if (!currentQ?.codeStarter || currentQ.codeStarter.length < 10) setCode(CODE_STARTERS[lang]); }} className={`tab ${language === lang ? 'active' : ''}`} style={{ padding: '5px 12px', fontSize: '0.78rem' }}>
-                      {lang === 'cpp' ? 'C++' : lang.charAt(0).toUpperCase() + lang.slice(1)}
-                    </button>
-                  ))}
+              {/* Editor header: language tabs + action buttons */}
+              <div style={{ padding: '8px 14px', background: 'var(--bg-card)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexShrink: 0 }}>
+                {/* Language tabs — dynamic, from selected roles */}
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', flex: 1, minWidth: 0 }}>
+                  {availableLangs.map(lang => {
+                    const m = LANG_META[lang];
+                    if (!m) return null;
+                    const active = language === lang;
+                    return (
+                      <button
+                        key={lang}
+                        onClick={() => changeLanguage(lang)}
+                        className={`tab ${active ? 'active' : ''}`}
+                        style={{
+                          padding: '5px 11px', fontSize: '0.76rem', fontWeight: active ? 700 : 500,
+                          borderBottom: active ? `2px solid ${m.color}` : '2px solid transparent',
+                          color: active ? m.color : 'var(--text-secondary)',
+                          background: active ? `${m.color}12` : 'transparent',
+                          borderRadius: 6, transition: 'all 0.15s',
+                        }}
+                      >
+                        {m.label}
+                      </button>
+                    );
+                  })}
                 </div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  {currentQ && <span className="badge badge-cyan" style={{ fontSize: '0.7rem' }}>{currentQ.topic}</span>}
-                  <button onClick={runCode} className="btn-primary" disabled={isRunning} style={{ padding: '7px 16px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: 5 }}>
-                    {isRunning ? <Square size={13} /> : <Play size={13} />}
-                    {isRunning ? 'Running...' : 'Run Code'}
+                {/* Right controls */}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+                  {currentQ && <span className="badge badge-cyan" style={{ fontSize: '0.68rem' }}>{currentQ.topic}</span>}
+                  <button
+                    onClick={analyzeComplexity}
+                    disabled={isAnalyzing}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5, padding: '6px 13px',
+                      borderRadius: 7, border: '1px solid rgba(251,191,36,0.4)',
+                      background: 'rgba(251,191,36,0.08)', color: '#fbbf24',
+                      fontSize: '0.78rem', fontWeight: 600, cursor: isAnalyzing ? 'not-allowed' : 'pointer',
+                      opacity: isAnalyzing ? 0.6 : 1, transition: 'all 0.15s',
+                    }}
+                  >
+                    <Zap size={12} />
+                    {isAnalyzing ? 'Analyzing…' : 'Analyze'}
+                  </button>
+                  <button onClick={runCode} className="btn-primary" disabled={isRunning} style={{ padding: '6px 14px', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 5 }}>
+                    {isRunning ? <Square size={12} /> : <Play size={12} />}
+                    {isRunning ? 'Running…' : 'Run Code'}
                   </button>
                 </div>
               </div>
-              <div style={{ flex: 1, overflow: 'hidden' }}>
+
+              {/* Monaco editor + output panel */}
+              <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                 <MonacoEditor
-                  height="65%"
-                  language={language === 'cpp' ? 'cpp' : language}
+                  height="60%"
+                  language={LANG_META[language]?.monacoId || language}
                   value={code}
                   onChange={v => setCode(v || '')}
                   theme="vs-dark"
                   options={{ fontSize: 14, fontFamily: 'JetBrains Mono, Fira Code, monospace', minimap: { enabled: false }, scrollBeyondLastLine: false, lineNumbers: 'on', wordWrap: 'on', automaticLayout: true, padding: { top: 16, bottom: 16 } }}
                 />
-                <div style={{ height: '35%', borderTop: '1px solid var(--border)', background: '#0d1117', padding: '12px 18px', overflowY: 'auto' }}>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>OUTPUT</div>
-                  {output ? (
-                    <pre style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.8rem', color: output.includes('failed') || output.includes('Error') ? '#f87171' : '#34d399', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{output}</pre>
-                  ) : <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Run your code to see output here...</div>}
+                <div style={{ flex: 1, borderTop: '1px solid var(--border)', background: '#0d1117', padding: '10px 16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {/* Text output */}
+                  <div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 5, fontWeight: 700, letterSpacing: '0.06em' }}>OUTPUT</div>
+                    {output ? (
+                      <pre style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.79rem', color: output.includes('failed') || output.includes('Error') || output.includes('❌') || output.includes('⚠️') ? '#f87171' : '#34d399', whiteSpace: 'pre-wrap', lineHeight: 1.6, margin: 0 }}>{output}</pre>
+                    ) : <div style={{ color: 'var(--text-muted)', fontSize: '0.79rem' }}>Run your code to see output…</div>}
+                  </div>
+
+                  {/* Complexity result card */}
+                  {complexityResult && (
+                    <div style={{ borderRadius: 10, border: '1px solid rgba(251,191,36,0.25)', background: 'rgba(251,191,36,0.05)', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <Zap size={13} style={{ color: '#fbbf24', flexShrink: 0 }} />
+                        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#fbbf24' }}>Complexity Analysis</span>
+                        {complexityResult.isOptimal && (
+                          <span style={{ padding: '1px 8px', borderRadius: 20, background: 'rgba(52,211,153,0.2)', border: '1px solid rgba(52,211,153,0.4)', color: '#34d399', fontSize: '0.68rem', fontWeight: 700 }}>✓ Optimal</span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ padding: '3px 10px', borderRadius: 20, background: 'rgba(167,139,250,0.15)', border: '1px solid rgba(167,139,250,0.3)', color: '#a78bfa', fontSize: '0.75rem', fontWeight: 700 }}>Time: {complexityResult.timeComplexity}</span>
+                        <span style={{ padding: '3px 10px', borderRadius: 20, background: 'rgba(34,211,238,0.15)', border: '1px solid rgba(34,211,238,0.3)', color: '#22d3ee', fontSize: '0.75rem', fontWeight: 700 }}>Space: {complexityResult.spaceComplexity}</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                        {[
+                          { label: 'Quality', val: complexityResult.codeQuality, color: '#a78bfa' },
+                          { label: 'Correctness', val: complexityResult.correctness, color: '#34d399' },
+                          { label: 'Optimization', val: complexityResult.optimizationScore, color: '#fbbf24' },
+                        ].map(({ label, val, color }) => (
+                          <div key={label} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontWeight: 600 }}>{label}</span>
+                            <span style={{ fontSize: '0.9rem', fontWeight: 800, color }}>{val}<span style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>%</span></span>
+                          </div>
+                        ))}
+                      </div>
+                      {complexityResult.timeExplanation && (
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                          <span style={{ color: '#a78bfa', fontWeight: 600 }}>Time: </span>{complexityResult.timeExplanation}
+                        </div>
+                      )}
+                      {complexityResult.feedback && (
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                          <span style={{ color: '#34d399', fontWeight: 600 }}>Feedback: </span>{complexityResult.feedback}
+                        </div>
+                      )}
+                      {complexityResult.suggestion && (
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', lineHeight: 1.5, padding: '6px 10px', borderRadius: 6, background: 'rgba(251,191,36,0.06)', border: '1px solid rgba(251,191,36,0.15)' }}>
+                          <span style={{ color: '#fbbf24', fontWeight: 600 }}>💡 </span>{complexityResult.suggestion}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
               <div style={{ padding: '8px 18px', background: 'var(--bg-secondary)', borderTop: '1px solid var(--border)', display: 'flex', gap: 24, alignItems: 'center' }}>
                 <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>LIVE SCORES:</span>
                 {[
-                  { label: type === 'hr' ? 'Structure' : 'Technical', val: scores.technical, color: '#a78bfa' },
-                  { label: type === 'hr' ? 'Comm.' : 'Comm.', val: scores.communication, color: '#34d399' },
-                  { label: type === 'hr' ? 'Keywords' : 'Problem Solving', val: scores.problemSolving, color: '#22d3ee' },
-                  { label: type === 'hr' ? 'Relevance' : 'Optimization', val: scores.optimization, color: '#f59e0b' },
+                  { label: 'Technical', val: scores.technical, color: '#a78bfa' },
+                  { label: 'Comm.', val: scores.communication, color: '#34d399' },
+                  { label: 'Problem Solving', val: scores.problemSolving, color: '#22d3ee' },
+                  { label: 'Optimization', val: scores.optimization, color: '#f59e0b' },
                 ].map(({ label, val, color }) => (
                   <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.76rem' }}>
                     <span style={{ color: 'var(--text-muted)' }}>{label}:</span>

@@ -78,6 +78,15 @@ export default function ProfilePage() {
   const [showExtracted, setShowExtracted] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // onDrop MUST be declared before any early return to satisfy Rules of Hooks
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) handleFileUpload(file);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skills, form]);
+
   useEffect(() => {
     if (!user) router.push('/auth/login');
   }, [user]);
@@ -148,13 +157,6 @@ export default function ProfilePage() {
       setUploading(false);
     }
   };
-
-  const onDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) handleFileUpload(file);
-  }, [skills, form]);
 
   const TABS: { id: Tab; label: string; icon: typeof User }[] = [
     { id: 'basic', label: 'Basic Info', icon: User },
@@ -394,168 +396,204 @@ export default function ProfilePage() {
                     </div>
                   </div>
                 ) : atsResult ? (
-                  // ATS Results
-                  <div>
-                    {/* File info */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)', borderRadius: 10, marginBottom: 16 }}>
-                      <CheckCircle size={20} color="#34d399" />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 600, color: 'white', fontSize: '0.88rem' }}>{resumeFile.name}</div>
-                        <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                          {(resumeFile.size / 1024).toFixed(0)} KB • {atsResult.extracted.pageCount} page{atsResult.extracted.pageCount > 1 ? 's' : ''} • {atsResult.extracted.wordCount} words
+                  // ── ATS Results ──────────────────────────────────────────────────
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+                    {/* File info bar */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)', borderRadius: 10 }}>
+                      <CheckCircle size={18} color="#34d399" />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, color: 'white', fontSize: '0.86rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{resumeFile.name}</div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                          {(resumeFile.size / 1024).toFixed(0)} KB
+                          {atsResult.extracted.pageCount ? ` • ${atsResult.extracted.pageCount} page${atsResult.extracted.pageCount > 1 ? 's' : ''}` : ''}
+                          {atsResult.extracted.wordCount ? ` • ${atsResult.extracted.wordCount} words` : ''}
                         </div>
                       </div>
-                      {atsResult.usedAI && <span style={{ padding: '3px 10px', borderRadius: 20, background: 'rgba(124,58,237,0.2)', border: '1px solid rgba(124,58,237,0.4)', color: '#a78bfa', fontSize: '0.72rem', fontWeight: 700 }}>✨ Gemini AI</span>}
+                      {atsResult.usedAI && <span style={{ padding: '3px 10px', borderRadius: 20, background: 'rgba(124,58,237,0.2)', border: '1px solid rgba(124,58,237,0.4)', color: '#a78bfa', fontSize: '0.7rem', fontWeight: 700, whiteSpace: 'nowrap' }}>✨ SambaNova AI</span>}
                     </div>
+
+                    {/* AI Summary */}
                     {atsResult.extracted.summary && (
-                      <div style={{ padding: '14px 18px', borderRadius: 10, background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.25)', marginBottom: 16 }}>
-                        <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#a78bfa', marginBottom: 6 }}>✨ GEMINI AI RESUME SUMMARY</div>
-                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.7, margin: 0 }}>{atsResult.extracted.summary}</p>
+                      <div style={{ padding: '14px 18px', borderRadius: 10, background: 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.2)' }}>
+                        <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#a78bfa', marginBottom: 6, letterSpacing: '0.05em' }}>✨ AI RESUME SUMMARY</div>
+                        <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', lineHeight: 1.7, margin: 0 }}>{atsResult.extracted.summary}</p>
                       </div>
                     )}
 
-                    {/* ATS Score Hero */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: 20, marginBottom: 20, padding: 24, borderRadius: 14, background: `${SCORE_BG(atsResult.ats.score)}`, border: `1px solid ${SCORE_BORDER(atsResult.ats.score)}` }}>
-                      {/* Circle score */}
-                      <div style={{ textAlign: 'center' }}>
-                        <div style={{ width: 120, height: 120, borderRadius: '50%', border: `5px solid ${SCORE_COLOR(atsResult.ats.score)}`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px', background: `${SCORE_BG(atsResult.ats.score)}`, boxShadow: `0 0 20px ${SCORE_COLOR(atsResult.ats.score)}40` }}>
-                          <div>
-                            <div style={{ fontSize: '2.4rem', fontWeight: 900, color: SCORE_COLOR(atsResult.ats.score), lineHeight: 1 }}>{atsResult.ats.score}</div>
-                            <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)' }}>/100</div>
+                    {/* ── Score Hero ──────────────────────────────────────────────── */}
+                    <div style={{ padding: 24, borderRadius: 14, background: SCORE_BG(atsResult.ats.score), border: `1px solid ${SCORE_BORDER(atsResult.ats.score)}` }}>
+                      {/* Top row: circle + summary stats */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 24, marginBottom: 24, flexWrap: 'wrap' }}>
+                        {/* Animated ring */}
+                        <div style={{ position: 'relative', width: 110, height: 110, flexShrink: 0 }}>
+                          <svg width="110" height="110" style={{ transform: 'rotate(-90deg)' }}>
+                            <circle cx="55" cy="55" r="46" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="9" />
+                            <circle cx="55" cy="55" r="46" fill="none" stroke={SCORE_COLOR(atsResult.ats.score)} strokeWidth="9"
+                              strokeDasharray={`${2 * Math.PI * 46}`}
+                              strokeDashoffset={`${2 * Math.PI * 46 * (1 - atsResult.ats.score / 100)}`}
+                              strokeLinecap="round"
+                              style={{ filter: `drop-shadow(0 0 6px ${SCORE_COLOR(atsResult.ats.score)}80)` }}
+                            />
+                          </svg>
+                          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                            <span style={{ fontSize: '1.9rem', fontWeight: 900, color: SCORE_COLOR(atsResult.ats.score), lineHeight: 1 }}>{atsResult.ats.score}</span>
+                            <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.45)', marginTop: 1 }}>/100</span>
                           </div>
                         </div>
-                        <div style={{ fontWeight: 800, fontSize: '1rem', color: SCORE_COLOR(atsResult.ats.score) }}>{atsResult.ats.label}</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>ATS Score • Grade {atsResult.ats.grade}</div>
+
+                        {/* Grade + label + mini stats */}
+                        <div style={{ flex: 1, minWidth: 180 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                            <span style={{ fontSize: '1.6rem', fontWeight: 900, color: SCORE_COLOR(atsResult.ats.score) }}>{atsResult.ats.label}</span>
+                            <span style={{ padding: '3px 10px', borderRadius: 20, background: `${SCORE_COLOR(atsResult.ats.score)}20`, border: `1px solid ${SCORE_COLOR(atsResult.ats.score)}50`, color: SCORE_COLOR(atsResult.ats.score), fontSize: '0.8rem', fontWeight: 800 }}>Grade {atsResult.ats.grade}</span>
+                          </div>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 14 }}>
+                            ATS Compatibility Score — {atsResult.ats.score >= 80 ? 'Likely to pass most ATS filters' : atsResult.ats.score >= 65 ? 'Passes many ATS systems' : atsResult.ats.score >= 50 ? 'May struggle with strict ATS filters' : 'Likely rejected by automated systems'}
+                          </div>
+                          {/* Technical + Communication mini cards */}
+                          <div style={{ display: 'flex', gap: 10 }}>
+                            {[
+                              { label: 'Technical', val: atsResult.extracted.technicalScore || 0, color: '#a78bfa', icon: '⚙️' },
+                              { label: 'Communication', val: atsResult.extracted.communicationScore || 0, color: '#22d3ee', icon: '💬' },
+                              { label: 'Experience', val: Math.min(100, (atsResult.extracted.yearsOfExperience || 0) * 15), color: '#34d399', icon: '📅', raw: `${atsResult.extracted.yearsOfExperience || 0}yr` },
+                            ].map(({ label, val, color, icon, raw }) => (
+                              <div key={label} style={{ flex: 1, padding: '8px 10px', borderRadius: 8, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginBottom: 3 }}>{icon} {label}</div>
+                                <div style={{ fontSize: '1.1rem', fontWeight: 800, color, lineHeight: 1, marginBottom: 4 }}>{raw ?? val}<span style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginLeft: 1 }}>{raw ? '' : '%'}</span></div>
+                                {!raw && (
+                                  <div style={{ height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.08)' }}>
+                                    <div style={{ height: '100%', borderRadius: 2, width: `${val}%`, background: color, transition: 'width 0.6s ease' }} />
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       </div>
 
-                      {/* Breakdown bars */}
-                      <div>
-                        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: 12 }}>SCORE BREAKDOWN</div>
-
-                        {/* Technical & Communication Scores */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-                          <div style={{ padding: 12, borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                            <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: 4 }}>Technical Score</div>
-                            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
-                              <span style={{ fontSize: '1.4rem', fontWeight: 800, color: SCORE_COLOR(atsResult.extracted.technicalScore || 0), lineHeight: 1 }}>{atsResult.extracted.technicalScore || 0}</span>
-                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 2 }}>/100</span>
-                            </div>
-                          </div>
-                          <div style={{ padding: 12, borderRadius: 8, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)' }}>
-                            <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: 4 }}>Communication</div>
-                            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
-                              <span style={{ fontSize: '1.4rem', fontWeight: 800, color: SCORE_COLOR(atsResult.extracted.communicationScore || 0), lineHeight: 1 }}>{atsResult.extracted.communicationScore || 0}</span>
-                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 2 }}>/100</span>
-                            </div>
-                          </div>
+                      {/* ── Score Breakdown bars ──────────────────────────────── */}
+                      <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 18 }}>
+                        <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.07em', marginBottom: 14 }}>SCORE BREAKDOWN (total = {atsResult.ats.score}/100)</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                          {([
+                            { key: 'Skills & Keywords',      max: 30, icon: '🔑', desc: 'Tech skills, tools, keywords' },
+                            { key: 'Sections Completeness',  max: 25, icon: '📋', desc: 'Contact, education, experience, skills' },
+                            { key: 'Action Verbs & Impact',  max: 15, icon: '⚡', desc: 'Built/Led/Designed + quantified results' },
+                            { key: 'Contact Information',    max: 15, icon: '📞', desc: 'Name, email, phone, LinkedIn, GitHub' },
+                            { key: 'Content Density',        max: 15, icon: '📝', desc: 'Detail level and bullet-point quality' },
+                          ] as const).map(({ key, max, icon, desc }) => {
+                            const val = Number((atsResult.ats.breakdown as Record<string, number>)[key] ?? 0);
+                            const pct = max > 0 ? Math.round((val / max) * 100) : 0;
+                            const color = SCORE_COLOR(pct);
+                            return (
+                              <div key={key}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <span style={{ fontSize: '0.85rem' }}>{icon}</span>
+                                    <span style={{ fontSize: '0.82rem', color: 'white', fontWeight: 600 }}>{key}</span>
+                                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>— {desc}</span>
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                                    <span style={{ fontSize: '0.82rem', fontWeight: 800, color }}>{val}<span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>/{max}</span></span>
+                                    <span style={{ fontSize: '0.7rem', fontWeight: 700, padding: '1px 6px', borderRadius: 10, background: `${color}18`, color, border: `1px solid ${color}40` }}>{pct}%</span>
+                                  </div>
+                                </div>
+                                <div style={{ height: 8, borderRadius: 4, background: 'rgba(255,255,255,0.07)', overflow: 'hidden' }}>
+                                  <div style={{ height: '100%', borderRadius: 4, width: `${pct}%`, background: `linear-gradient(90deg, ${color}cc, ${color})`, boxShadow: `0 0 8px ${color}60`, transition: 'width 0.7s cubic-bezier(0.4,0,0.2,1)' }} />
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
+                      </div>
+                    </div>
 
-                        {Object.entries(atsResult.ats.breakdown).map(([label, val]) => {
-                          const maxVal = label === 'Skills & Keywords' ? 30 : label === 'Sections Completeness' ? 25 : 15;
-                          const pct = Math.round((val / maxVal) * 100);
+                    {/* ── Suggestions (always visible) ────────────────────────── */}
+                    <div>
+                      <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.07em', marginBottom: 10 }}>AI SUGGESTIONS ({atsResult.ats.suggestions.length})</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {atsResult.ats.suggestions.map((s, i) => {
+                          const cfg = s.type === 'good'
+                            ? { bg: 'rgba(16,185,129,0.07)', border: 'rgba(16,185,129,0.25)', color: '#34d399', icon: '✅' }
+                            : s.type === 'warning'
+                            ? { bg: 'rgba(245,158,11,0.07)', border: 'rgba(245,158,11,0.25)', color: '#fbbf24', icon: '⚠️' }
+                            : { bg: 'rgba(239,68,68,0.07)', border: 'rgba(239,68,68,0.25)', color: '#f87171', icon: '❌' };
                           return (
-                            <div key={label} style={{ marginBottom: 10 }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', marginBottom: 4 }}>
-                                <span style={{ color: 'var(--text-secondary)' }}>{label}</span>
-                                <span style={{ fontWeight: 700, color: SCORE_COLOR(pct) }}>{val}/{maxVal}</span>
-                              </div>
-                              <div className="progress-bar" style={{ height: 5 }}>
-                                <div className="progress-fill" style={{ width: `${(val / maxVal) * 100}%`, background: SCORE_COLOR(pct) }} />
-                              </div>
+                            <div key={i} style={{ padding: '10px 14px', borderRadius: 9, display: 'flex', gap: 10, alignItems: 'flex-start', background: cfg.bg, border: `1px solid ${cfg.border}` }}>
+                              <span style={{ flexShrink: 0, marginTop: 1 }}>{cfg.icon}</span>
+                              <span style={{ color: 'var(--text-secondary)', fontSize: '0.82rem', lineHeight: 1.6 }}>{s.message}</span>
                             </div>
                           );
                         })}
-                        <button onClick={() => setShowBreakdown(b => !b)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 4, marginTop: 6 }}>
-                          {showBreakdown ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                          {showBreakdown ? 'Hide' : 'Show'} full suggestions
-                        </button>
                       </div>
                     </div>
 
-                    {/* Suggestions */}
-                    {showBreakdown && (
-                      <div style={{ marginBottom: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        {atsResult.ats.suggestions.map((s, i) => (
-                          <div key={i} style={{
-                            padding: '10px 14px', borderRadius: 8, fontSize: '0.83rem', display: 'flex', gap: 10, alignItems: 'flex-start',
-                            background: s.type === 'good' ? 'rgba(16,185,129,0.07)' : s.type === 'warning' ? 'rgba(245,158,11,0.07)' : 'rgba(239,68,68,0.07)',
-                            border: `1px solid ${s.type === 'good' ? 'rgba(16,185,129,0.25)' : s.type === 'warning' ? 'rgba(245,158,11,0.25)' : 'rgba(239,68,68,0.25)'}`,
-                          }}>
-                            <span style={{ flexShrink: 0 }}>{s.type === 'good' ? '✅' : s.type === 'warning' ? '⚠️' : '❌'}</span>
-                            <span style={{ color: 'var(--text-secondary)', lineHeight: 1.5 }}>{s.message}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Extracted info */}
-                    <div style={{ borderTop: '1px solid var(--border)', paddingTop: 20 }}>
-                      <button onClick={() => setShowExtracted(b => !b)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, fontWeight: 600, width: '100%' }}>
-                        <Brain size={16} color="#a78bfa" />
+                    {/* ── Extracted Info (collapsible) ─────────────────────────── */}
+                    <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+                      <button onClick={() => setShowExtracted(b => !b)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, width: '100%', marginBottom: showExtracted ? 14 : 0 }}>
+                        <Brain size={15} color="#a78bfa" />
                         AI Extracted Information
-                        {showExtracted ? <ChevronUp size={15} style={{ marginLeft: 'auto' }} /> : <ChevronDown size={15} style={{ marginLeft: 'auto' }} />}
+                        {showExtracted ? <ChevronUp size={14} style={{ marginLeft: 'auto' }} /> : <ChevronDown size={14} style={{ marginLeft: 'auto' }} />}
                       </button>
                       {showExtracted && (
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                           <div style={{ padding: 16, borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: 10 }}>DETECTED INFO</div>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: 10 }}>DETECTED INFO</div>
                             {[
-                              { label: 'Name', val: atsResult.extracted.name || 'Not detected' },
+                              { label: 'Name',  val: atsResult.extracted.name  || 'Not detected' },
                               { label: 'Email', val: atsResult.extracted.email || 'Not detected' },
                               { label: 'Phone', val: atsResult.extracted.phone || 'Not detected' },
-                              { label: 'CGPA', val: atsResult.extracted.cgpa || 'Not detected' },
+                              { label: 'CGPA',  val: atsResult.extracted.cgpa  || 'Not detected' },
                             ].map(({ label, val }) => (
-                              <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: '0.82rem' }}>
+                              <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: '0.81rem' }}>
                                 <span style={{ color: 'var(--text-muted)' }}>{label}</span>
                                 <span style={{ color: 'white', fontWeight: 500, maxWidth: 180, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{val}</span>
                               </div>
                             ))}
                           </div>
                           <div style={{ padding: 16, borderRadius: 10, border: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: 10 }}>ROLE SUGGESTIONS</div>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: 10 }}>ROLE SUGGESTIONS</div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                               {atsResult.extracted.suggestedRoles.map((r, i) => (
-                                <button key={i} onClick={() => { setField('targetRole', r.split(' (')[0]); }} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '0.8rem', textAlign: 'left' }}>
-                                  <Target size={13} color="#a78bfa" />
+                                <button key={i} onClick={() => setField('targetRole', r.split(' (')[0])} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '0.79rem', textAlign: 'left' }}>
+                                  <Target size={12} color="#a78bfa" />
                                   <span style={{ flex: 1 }}>{r}</span>
-                                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Set →</span>
+                                  <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Set →</span>
                                 </button>
                               ))}
-                              {atsResult.extracted.suggestedRoles.length === 0 && <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Add more skills for role detection</span>}
+                              {atsResult.extracted.suggestedRoles.length === 0 && <span style={{ color: 'var(--text-muted)', fontSize: '0.79rem' }}>Add more skills for role detection</span>}
                             </div>
                           </div>
-                          {/* Extracted skills */}
-                          <div style={{ gridColumn: '1 / -1', padding: 16, borderRadius: 10, border: '1px solid rgba(124,58,237,0.3)', background: 'rgba(124,58,237,0.06)' }}>
+                          <div style={{ gridColumn: '1 / -1', padding: '14px 16px', borderRadius: 10, border: '1px solid rgba(124,58,237,0.3)', background: 'rgba(124,58,237,0.05)' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                              <Zap size={14} color="#a78bfa" />
-                              <span style={{ fontSize: '0.78rem', color: '#a78bfa', fontWeight: 700 }}>SKILLS EXTRACTED & ADDED ({atsResult.extracted.skills.length})</span>
+                              <Zap size={13} color="#a78bfa" />
+                              <span style={{ fontSize: '0.75rem', color: '#a78bfa', fontWeight: 700 }}>SKILLS EXTRACTED & AUTO-ADDED ({atsResult.extracted.skills.length})</span>
                             </div>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                               {atsResult.extracted.skills.map(s => (
-                                <span key={s} style={{ padding: '4px 10px', borderRadius: 12, background: 'rgba(124,58,237,0.2)', border: '1px solid rgba(124,58,237,0.35)', color: '#a78bfa', fontSize: '0.78rem', fontWeight: 600 }}>
-                                  {s}
-                                </span>
+                                <span key={s} style={{ padding: '3px 10px', borderRadius: 12, background: 'rgba(124,58,237,0.18)', border: '1px solid rgba(124,58,237,0.35)', color: '#a78bfa', fontSize: '0.76rem', fontWeight: 600 }}>{s}</span>
                               ))}
                             </div>
-                            <div style={{ marginTop: 10, fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                              ✅ These have been auto-added to your Skills tab. Go to <strong style={{ cursor: 'pointer', color: '#a78bfa' }} onClick={() => setActiveTab('skills')}>Skills tab</strong> to review.
+                            <div style={{ marginTop: 10, fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                              ✅ Auto-added to your Skills tab. <strong style={{ cursor: 'pointer', color: '#a78bfa' }} onClick={() => setActiveTab('skills')}>Go to Skills →</strong>
                             </div>
                           </div>
                         </div>
                       )}
                     </div>
 
-                    {/* Suggested roles for AI interview */}
+                    {/* ── AI Interview CTA ─────────────────────────────────────── */}
                     {atsResult.extracted.suggestedRoles.length > 0 && (
-                      <div style={{ marginTop: 16, padding: '14px 18px', borderRadius: 10, background: 'rgba(6,182,212,0.07)', border: '1px solid rgba(6,182,212,0.25)' }}>
-                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-                          <Brain size={16} color="#22d3ee" />
-                          <span style={{ color: '#22d3ee', fontWeight: 700, fontSize: '0.83rem' }}>AI Interview Personalization Active</span>
+                      <div style={{ padding: '14px 18px', borderRadius: 10, background: 'rgba(6,182,212,0.07)', border: '1px solid rgba(6,182,212,0.25)' }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                          <Brain size={15} color="#22d3ee" />
+                          <span style={{ color: '#22d3ee', fontWeight: 700, fontSize: '0.82rem' }}>AI Interview Personalization Active</span>
                         </div>
-                        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
-                          Your AI interviewer will now ask questions tailored to your resume skills. Top match: <strong style={{ color: 'white' }}>{atsResult.extracted.suggestedRoles[0]?.split(' (')[0]}</strong>. Start an AI interview to experience personalized questions!
+                        <p style={{ fontSize: '0.79rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: '0 0 10px' }}>
+                          Your AI interviewer will ask questions tailored to your resume skills. Top match: <strong style={{ color: 'white' }}>{atsResult.extracted.suggestedRoles[0]?.split(' (')[0]}</strong>.
                         </p>
-                        <button className="btn-primary" onClick={() => router.push('/interview/ai')} style={{ marginTop: 12, padding: '8px 20px', fontSize: '0.83rem' }}>
+                        <button className="btn-primary" onClick={() => router.push('/interview/ai')} style={{ padding: '8px 20px', fontSize: '0.82rem' }}>
                           Start AI Interview →
                         </button>
                       </div>

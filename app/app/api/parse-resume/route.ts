@@ -4,64 +4,72 @@ import crypto from 'crypto';
 import { saveResumeAnalysis, getCachedAnalysis } from '@/lib/database';
 
 // ── Prompt ────────────────────────────────────────────────────────────────────
-const PROMPT = `You are an expert ATS resume analyst and technical interviewer. Analyze the resume and return ONLY a JSON object with this exact structure (no markdown, no extra text):
+const PROMPT = `You are an expert ATS resume analyst. Analyze the provided resume and return ONLY a JSON object with this exact structure (no markdown, no extra text, no explanation):
 
 {
   "ats": {
-    "score": <integer 0-100: realistic ATS score>,
-    "grade": <"A"|"B"|"C"|"D">,
-    "label": <"Excellent"|"Good"|"Average"|"Needs Work">,
+    "score": <integer 0-100: MUST equal the sum of all 5 breakdown values below>,
+    "grade": <"A" if score>=80 | "B" if 65-79 | "C" if 50-64 | "D" if <50>,
+    "label": <"Excellent" if A | "Good" if B | "Average" if C | "Needs Work" if D>,
     "breakdown": {
-      "Skills & Keywords": <integer 0-30>,
-      "Sections Completeness": <integer 0-25>,
-      "Action Verbs & Impact": <integer 0-15>,
-      "Contact Information": <integer 0-15>,
-      "Content Density": <integer 0-15>
+      "Skills & Keywords": <integer 0-30: score based on quantity and relevance of technical skills, tools, certifications, keywords recruiters search for>,
+      "Sections Completeness": <integer 0-25: score for having all key sections: contact, education, experience/projects, skills, summary/objective>,
+      "Action Verbs & Impact": <integer 0-15: score for strong action verbs like Built/Led/Designed/Optimized and quantified achievements with numbers>,
+      "Contact Information": <integer 0-15: score for having name, email, phone, LinkedIn, GitHub, location>,
+      "Content Density": <integer 0-15: score for appropriate detail level — not too sparse, not too verbose, good use of bullet points>
     },
     "suggestions": [
-      { "type": "good"|"warning"|"error", "message": "<actionable suggestion>" }
+      { "type": "good", "message": "<what the resume does well — be specific>" },
+      { "type": "good", "message": "<another strength>" },
+      { "type": "warning", "message": "<something that could be improved — be specific and actionable>" },
+      { "type": "warning", "message": "<another improvement area>" },
+      { "type": "error", "message": "<a critical missing element or serious weakness — be specific>" }
     ]
   },
   "extracted": {
-    "name": "<full name>",
-    "email": "<email or empty string>",
-    "phone": "<phone or empty string>",
-    "cgpa": "<cgpa/gpa or empty string>",
-    "skills": ["<10-15 specific tech skills found: languages, frameworks, tools, platforms>"],
-    "yearsOfExperience": <integer>,
-    "technicalScore": <integer 0-100: depth of technical skills found>,
-    "communicationScore": <integer 0-100: quality of writing, clarity, action verbs, impact statements>,
-    "suggestedRoles": ["<Top 3 job roles with % match e.g. Full Stack Developer (88% match)>"],
-    "summary": "<2-3 sentence professional summary of this candidate>"
+    "name": "<full name from resume>",
+    "email": "<email address or empty string>",
+    "phone": "<phone number or empty string>",
+    "cgpa": "<GPA/CGPA value or empty string>",
+    "skills": ["<10-15 specific technical skills, languages, frameworks, tools, platforms actually found in the resume>"],
+    "yearsOfExperience": <integer: 0 for fresher/student, estimate from work history>,
+    "technicalScore": <integer 0-100: depth and breadth of technical skills, projects, and technical achievements>,
+    "communicationScore": <integer 0-100: writing quality, clarity, use of action verbs, quantified results, grammar>,
+    "suggestedRoles": ["<Role Name (XX% match)", "<Role Name (XX% match)", "<Role Name (XX% match)"],
+    "summary": "<2-3 sentence professional summary describing this candidate's profile, strengths, and suitability>"
   }
 }
 
-Scoring rules:
-- ATS score: A=80-100, B=65-79, C=50-64, D=0-49. Average fresher = 45-65, be strict
-- technicalScore: based on breadth/depth of tech skills, projects, certifications
-- communicationScore: based on clarity, use of action verbs, quantified achievements, grammar
-- Give 4-6 suggestions, mix of good/warning/error
-- ONLY respond with the JSON object, nothing else.`;
+Critical rules:
+- ats.score MUST equal exactly: Skills&Keywords + SectionsCompleteness + ActionVerbs + ContactInfo + ContentDensity
+- Be realistic and strict: average student resume = 45-62, good experienced = 70-82, exceptional = 83+
+- technicalScore and communicationScore are independent 0-100 scores, NOT capped by ATS score
+- Give exactly 5 suggestions (2 good, 2 warning, 1 error minimum)
+- ONLY return the JSON object, no other text`;
 
 // ── PDF text extraction ───────────────────────────────────────────────────────
-async function extractPDFText(buffer: Buffer): Promise<string> {
+async function extractPDFText(buffer: Buffer): Promise<{ text: string; pageCount: number }> {
   try {
+    // pdf-parse exports a single async default function — NOT a class
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { PDFParse } = require('pdf-parse');
-    const parser = new PDFParse({ data: buffer });
-    const result = await parser.getText();
-    await parser.destroy();
-    return (result.text || '').trim();
+    const pdfParse = require('pdf-parse');
+    const result = await pdfParse(buffer);
+    return {
+      text: (result.text || '').trim(),
+      pageCount: result.numpages || 1,
+    };
   } catch (e) {
     console.error('PDF parse error:', e);
-    // Raw fallback — extract text objects from PDF binary
+    // Raw fallback — scrape printable strings from PDF binary
     const raw = buffer.toString('latin1');
     const matches = raw.match(/\(([^)]{3,300})\)/g) || [];
     const text = matches
       .map(m => m.slice(1, -1).replace(/\\[nrt]/g, ' '))
       .filter(t => /[a-zA-Z]{3,}/.test(t))
-      .join(' ');
-    return text.replace(/\s+/g, ' ').trim();
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return { text, pageCount: 1 };
   }
 }
 
@@ -124,17 +132,28 @@ export async function POST(req: NextRequest) {
         max_tokens: 1500,
         temperature: 0.1,
       });
-      const raw = res.choices[0]?.message?.content?.trim() || '{}';
-      parsed = JSON.parse(raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim());
+      let rawImg = res.choices[0]?.message?.content?.trim() || '{}';
+      rawImg = rawImg.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+      const jsonMatchImg = rawImg.match(/\{[\s\S]*\}/);
+      if (jsonMatchImg) rawImg = jsonMatchImg[0];
+      parsed = JSON.parse(rawImg);
+      // Images are single-page; estimate word count from extracted skills/summary
+      if (parsed.extracted) {
+        parsed.extracted.pageCount = parsed.extracted.pageCount || 1;
+        const textForWc = [parsed.extracted.summary || '', (parsed.extracted.skills || []).join(' ')].join(' ');
+        parsed.extracted.wordCount = parsed.extracted.wordCount || Math.max(50, textForWc.split(/\s+/).filter(Boolean).length);
+      }
 
     } else {
       // ── PDF → extract text → Meta-Llama-3.3-70B-Instruct ──────────────
-      const text = await extractPDFText(buffer);
+      const { text, pageCount: pdfPageCount } = await extractPDFText(buffer);
       if (!text || text.length < 80) {
         return NextResponse.json({
           error: 'Could not extract text from this PDF. If it is scanned, upload it as a PNG/JPG image instead.',
         }, { status: 400 });
       }
+
+      const wordCount = text.split(/\s+/).filter(Boolean).length;
 
       const res = await openai.chat.completions.create({
         model: 'Meta-Llama-3.3-70B-Instruct',
@@ -145,8 +164,18 @@ export async function POST(req: NextRequest) {
         max_tokens: 1500,
         temperature: 0.1,
       });
-      const raw = res.choices[0]?.message?.content?.trim() || '{}';
-      parsed = JSON.parse(raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim());
+      let raw = res.choices[0]?.message?.content?.trim() || '{}';
+      // Strip any markdown code fences the model might add
+      raw = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+      // Extract JSON object if there's extra text around it
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (jsonMatch) raw = jsonMatch[0];
+      parsed = JSON.parse(raw);
+      // Attach PDF-derived metadata so the UI can display it
+      if (parsed.extracted) {
+        parsed.extracted.wordCount = wordCount;
+        parsed.extracted.pageCount = pdfPageCount;
+      }
     }
 
     // ── Validate & fill defaults ──────────────────────────────────────────
@@ -157,6 +186,28 @@ export async function POST(req: NextRequest) {
     parsed.ats.suggestions = parsed.ats.suggestions || [];
     parsed.extracted.technicalScore = parsed.extracted.technicalScore ?? 0;
     parsed.extracted.communicationScore = parsed.extracted.communicationScore ?? 0;
+
+    // ── Enforce: ATS score = sum of breakdown values ──────────────────────
+    const bd = parsed.ats.breakdown || {};
+    const BREAKDOWN_MAX: Record<string, number> = {
+      'Skills & Keywords': 30,
+      'Sections Completeness': 25,
+      'Action Verbs & Impact': 15,
+      'Contact Information': 15,
+      'Content Density': 15,
+    };
+    // Clamp each breakdown value to its max
+    for (const [key, max] of Object.entries(BREAKDOWN_MAX)) {
+      if (bd[key] === undefined || bd[key] === null) bd[key] = 0;
+      bd[key] = Math.min(Math.max(0, Number(bd[key])), max);
+    }
+    parsed.ats.breakdown = bd;
+    // Recalculate total from breakdown so score is always consistent
+    const bdSum = Object.values(bd).reduce((a: number, v) => a + (Number(v) || 0), 0);
+    parsed.ats.score = bdSum;
+    // Re-derive grade and label from corrected score
+    parsed.ats.grade  = bdSum >= 80 ? 'A' : bdSum >= 65 ? 'B' : bdSum >= 50 ? 'C' : 'D';
+    parsed.ats.label  = bdSum >= 80 ? 'Excellent' : bdSum >= 65 ? 'Good' : bdSum >= 50 ? 'Average' : 'Needs Work';
 
     // ── Save to Supabase ──────────────────────────────────────────────────
     try {
