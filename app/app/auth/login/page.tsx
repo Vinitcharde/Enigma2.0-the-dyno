@@ -51,18 +51,33 @@ export default function LoginPage() {
     const ok = await login(email, password);
     if (!ok) {
       setError('Invalid credentials. Try demo accounts listed below.');
+    } else {
+      // Redirect based on role stored in context
+      const stored = localStorage.getItem('placeai_user');
+      const u = stored ? JSON.parse(stored) : null;
+      router.push(u?.role === 'expert' ? '/expert/dashboard' : '/dashboard');
     }
   };
 
-  const quickLogin = () => {
-    setEmail('student@demo.com');
-    setPassword('demo123');
+  // One-click student demo login
+  const quickLogin = async () => {
+    const ok = await login('student@demo.com', 'demo123');
+    if (ok) router.push('/dashboard');
+    else { setEmail('student@demo.com'); setPassword('demo123'); }
   };
 
-  const quickExpertLogin = (expertEmail: string) => {
-    setEmail(expertEmail);
-    setPassword('demo123');
+  // One-click expert sign-in: no form fill, no button press, instantly redirect
+  const quickExpertLogin = async (expertEmail: string) => {
     setShowExpertList(false);
+    setError('');
+    const ok = await login(expertEmail, 'demo123');
+    if (ok) {
+      router.push('/expert/dashboard');
+    } else {
+      setEmail(expertEmail);
+      setPassword('demo123');
+      setError('Auto-login failed. Click Sign In to try again.');
+    }
   };
 
   return (
@@ -184,9 +199,7 @@ export default function LoginPage() {
 
           <p style={{ marginTop: 24, textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
             No account?{' '}
-            <button onClick={() => router.push('/auth/register')} style={{ background: 'none', border: 'none', color: '#a78bfa', cursor: 'pointer', fontWeight: 600 }}>
-              Register free
-            </button>
+            <button onClick={() => router.push('/auth/register')} style={{ background: 'none', border: 'none', color: '#a78bfa', cursor: 'pointer', fontWeight: 600 }}>Register free</button>
           </p>
         </div>
       </div>

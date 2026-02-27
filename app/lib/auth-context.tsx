@@ -42,6 +42,40 @@ interface RegisterData {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+// ── Demo user bypass ─────────────────────────────────────────────────────────
+// These accounts are resolved instantly (no DB round-trip) when password = 'demo123'
+const DEMO_USERS: Record<string, User> = {
+  'student@demo.com': { id: 'student-demo', email: 'student@demo.com', name: 'Demo Student', role: 'student', college: 'IIT Bombay', skills: ['React', 'Python', 'SQL'] },
+  // Full Stack
+  'priya.mehta@expert.com':   { id: 'expert-priya.mehta',   email: 'priya.mehta@expert.com',   name: 'Priya Mehta',   role: 'expert', company: 'Google',     bio: '8+ years at Google. Ex-interviewer. Full Stack expert.' },
+  'rohit.jain@expert.com':    { id: 'expert-rohit.jain',    email: 'rohit.jain@expert.com',    name: 'Rohit Jain',    role: 'expert', company: 'Flipkart',   bio: 'Staff Engineer at Flipkart. Full stack, 6+ years.' },
+  'ananya.das@expert.com':    { id: 'expert-ananya.das',    email: 'ananya.das@expert.com',    name: 'Ananya Das',    role: 'expert', company: 'Atlassian',  bio: 'Tech Lead at Atlassian. MERN, GraphQL, AWS.' },
+  // Backend
+  'arjun.kapoor@expert.com':  { id: 'expert-arjun.kapoor',  email: 'arjun.kapoor@expert.com',  name: 'Arjun Kapoor',  role: 'expert', company: 'Amazon',     bio: 'Amazon L7. Distributed systems, bar-raiser.' },
+  'karthik.rao@expert.com':   { id: 'expert-karthik.rao',   email: 'karthik.rao@expert.com',   name: 'Karthik Rao',   role: 'expert', company: 'Uber',       bio: '5+ years at Uber. Go, Kafka, System Design.' },
+  'neha.gupta@expert.com':    { id: 'expert-neha.gupta',    email: 'neha.gupta@expert.com',    name: 'Neha Gupta',    role: 'expert', company: 'Razorpay',   bio: 'EM at Razorpay. Python, PostgreSQL, Docker.' },
+  // Data Science
+  'sneha.reddy@expert.com':   { id: 'expert-sneha.reddy',   email: 'sneha.reddy@expert.com',   name: 'Sneha Reddy',   role: 'expert', company: 'Microsoft',  bio: 'Azure AI. DS Lead. ML & Statistics.' },
+  'aditya.sharma@expert.com': { id: 'expert-aditya.sharma', email: 'aditya.sharma@expert.com', name: 'Aditya Sharma', role: 'expert', company: 'Meta',       bio: 'Staff DS at Meta. Deep Learning, NLP.' },
+  'ritu.patel@expert.com':    { id: 'expert-ritu.patel',    email: 'ritu.patel@expert.com',    name: 'Ritu Patel',    role: 'expert', company: 'Swiggy',     bio: 'Senior DS at Swiggy. Demand forecasting, SQL.' },
+  // ML
+  'vikram.iyer@expert.com':   { id: 'expert-vikram.iyer',   email: 'vikram.iyer@expert.com',   name: 'Vikram Iyer',   role: 'expert', company: 'NVIDIA',     bio: 'ML Infra Lead at NVIDIA. PyTorch, CUDA, MLOps.' },
+  'deepa.nair@expert.com':    { id: 'expert-deepa.nair',    email: 'deepa.nair@expert.com',    name: 'Deepa Nair',    role: 'expert', company: 'DeepMind',   bio: 'Research Engineer at DeepMind. 15+ ML papers.' },
+  'saurabh.verma@expert.com': { id: 'expert-saurabh.verma', email: 'saurabh.verma@expert.com', name: 'Saurabh Verma', role: 'expert', company: 'Amazon',     bio: 'Applied Scientist at Amazon. NLP, SageMaker.' },
+  // Frontend
+  'kavya.krishnan@expert.com':{ id: 'expert-kavya.krishnan',email: 'kavya.krishnan@expert.com',name: 'Kavya Krishnan',role: 'expert', company: 'Airbnb',     bio: 'Senior FE at Airbnb. React, CSS, Performance.' },
+  'manish.tiwari@expert.com': { id: 'expert-manish.tiwari', email: 'manish.tiwari@expert.com', name: 'Manish Tiwari', role: 'expert', company: 'Razorpay',   bio: 'Frontend Lead at Razorpay. Next.js, TypeScript.' },
+  'shruti.bose@expert.com':   { id: 'expert-shruti.bose',   email: 'shruti.bose@expert.com',   name: 'Shruti Bose',   role: 'expert', company: 'Figma',      bio: 'Staff Engineer at Figma. WebGL, Canvas.' },
+  // DevOps
+  'rajesh.kumar@expert.com':  { id: 'expert-rajesh.kumar',  email: 'rajesh.kumar@expert.com',  name: 'Rajesh Kumar',  role: 'expert', company: 'Netflix',    bio: 'Senior SRE at Netflix. Kubernetes, Terraform.' },
+  'pooja.singh@expert.com':   { id: 'expert-pooja.singh',   email: 'pooja.singh@expert.com',   name: 'Pooja Singh',   role: 'expert', company: 'AWS',        bio: 'Solutions Architect at AWS. CloudFormation, Security.' },
+  'amit.desai@expert.com':    { id: 'expert-amit.desai',    email: 'amit.desai@expert.com',    name: 'Amit Desai',    role: 'expert', company: 'Zomato',     bio: 'Platform Engineer at Zomato. Docker, Prometheus.' },
+  // Product
+  'vikram.singh@expert.com':  { id: 'expert-vikram.singh',  email: 'vikram.singh@expert.com',  name: 'Vikram Singh',  role: 'expert', company: 'Flipkart',   bio: 'Director of Product at Flipkart. IIM-A.' },
+  'megha.arora@expert.com':   { id: 'expert-megha.arora',   email: 'megha.arora@expert.com',   name: 'Megha Arora',   role: 'expert', company: 'Google',     bio: 'Group PM at Google. 500M+ user products.' },
+  'nitin.bhatt@expert.com':   { id: 'expert-nitin.bhatt',   email: 'nitin.bhatt@expert.com',   name: 'Nitin Bhatt',   role: 'expert', company: 'Cred',       bio: 'Senior PM at CRED. Fintech, 0-to-1 products.' },
+};
+
 async function dbFetch(action: string, body?: Record<string, any>) {
   if (body) {
     const res = await fetch('/api/db', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...body }) });
@@ -71,6 +105,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {}, []);
 
   const login = async (email: string, password: string): Promise<boolean> => {
+    // ── Demo fast-path: instant login, no Supabase call ──────────────────
+    const demoUser = DEMO_USERS[email.toLowerCase().trim()];
+    if (demoUser && password === 'demo123') {
+      localStorage.setItem('placeai_user', JSON.stringify(demoUser));
+      setUser(demoUser);
+      return true;
+    }
+    // ── Real DB login ─────────────────────────────────────────────────────
     setIsLoading(true);
     try {
       const res = await dbFetch('login', { email, password });
