@@ -85,10 +85,10 @@ export default function ExpertDashboardPage() {
         }
       } catch {}
     };
-    loadBookings();
-    loadFeedback();
-    // Poll for new bookings every 4 seconds
-    const interval = setInterval(loadBookings, 4000);
+    // Load both in parallel on mount
+    Promise.all([loadBookings(), loadFeedback()]);
+    // Poll for new bookings every 15 seconds (reduces Supabase load)
+    const interval = setInterval(loadBookings, 15000);
     return () => clearInterval(interval);
   }, [user]);
 

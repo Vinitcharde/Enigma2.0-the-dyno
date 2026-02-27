@@ -50,37 +50,25 @@ async function dbFetch(action: string, body?: Record<string, any>) {
   return fetch(`/api/db?action=${action}`);
 }
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    // Restore session from localStorage cache, then verify against DB
+// Read cached user synchronously so there is zero loading flash
+function readCachedUser(): User | null {
+  if (typeof window === 'undefined') return null;
+  try {
     const stored = localStorage.getItem('placeai_user');
-    if (stored) {
-      try {
-        const cached = JSON.parse(stored);
-        setUser(cached);
-        // Refresh from DB in background
-        fetch(`/api/db?action=getUser&email=${encodeURIComponent(cached.email)}`)
-          .then(r => r.ok ? r.json() : null)
-          .then(fresh => {
-            if (fresh) {
-              const mapped: User = {
-                id: fresh.id, email: fresh.email, name: fresh.name, role: fresh.role,
-                avatar: fresh.avatar, college: fresh.college, company: fresh.company,
-                skills: fresh.skills || [], targetRole: fresh.targetRole, cgpa: fresh.cgpa,
-                graduationYear: fresh.graduationYear, phone: fresh.phone, bio: fresh.bio,
-                linkedin: fresh.linkedin, github: fresh.github,
-              };
-              setUser(mapped);
-              localStorage.setItem('placeai_user', JSON.stringify(mapped));
-            }
-          }).catch(() => {});
-      } catch {}
-    }
-    setIsLoading(false);
-  }, []);
+    return stored ? (JSON.parse(stored) as User) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  // Initialize synchronously from localStorage — no spinner on mount
+  const [user, setUser] = useState<User | null>(readCachedUser);
+  const [isLoading, setIsLoading] = useState(false); // never block on start
+
+  // No background DB re-fetch — localStorage is the source of truth.
+  // Profile updates already write back to DB via updateProfile().
+  useEffect(() => {}, []);
 
   const login = async (email: string, password: string): Promise<boolean> => {
     setIsLoading(true);
@@ -88,6 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await dbFetch('login', { email, password });
       if (!res.ok) { setIsLoading(false); return false; }
       const data = await res.json();
+      if (!data || !data.id) { setIsLoading(false); return false; }
       const mapped: User = {
         id: data.id, email: data.email, name: data.name, role: data.role,
         avatar: data.avatar, college: data.college, company: data.company,
@@ -95,8 +84,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         graduationYear: data.graduationYear, phone: data.phone, bio: data.bio,
         linkedin: data.linkedin, github: data.github,
       };
-      setUser(mapped);
+      // Write to localStorage BEFORE setUser so any redirect sees it instantly
       localStorage.setItem('placeai_user', JSON.stringify(mapped));
+      setUser(mapped);
       setIsLoading(false);
       return true;
     } catch {
