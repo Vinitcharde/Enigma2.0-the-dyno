@@ -598,6 +598,41 @@ export default function ProfilePage() {
                         </button>
                       </div>
                     )}
+
+                    {/* ── Resume Based Quiz CTA ─────────────────────────────────── */}
+                    {atsResult.extracted.skills.length > 0 && (
+                      <div style={{ padding: '18px 20px', borderRadius: 12, background: 'rgba(124,58,237,0.08)', border: '2px solid rgba(124,58,237,0.35)' }}>
+                        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 12 }}>
+                          <div style={{ width: 38, height: 38, borderRadius: 10, background: 'rgba(124,58,237,0.2)', border: '1px solid rgba(124,58,237,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            <span style={{ fontSize: '1.2rem' }}>🎯</span>
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 700, color: 'white', fontSize: '0.92rem', marginBottom: 3 }}>Resume-Based Technical Quiz</div>
+                            <p style={{ fontSize: '0.79rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                              10 AI-generated questions targeting <strong style={{ color: '#a78bfa' }}>{atsResult.extracted.skills.slice(0, 3).join(', ')}</strong>{atsResult.extracted.skills.length > 3 ? ` +${atsResult.extracted.skills.length - 3} more skills` : ''} from your resume. Timed 15 minutes.
+                            </p>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+                          {atsResult.extracted.skills.slice(0, 6).map(s => (
+                            <span key={s} style={{ padding: '2px 9px', borderRadius: 10, background: 'rgba(124,58,237,0.18)', border: '1px solid rgba(124,58,237,0.35)', color: '#a78bfa', fontSize: '0.73rem', fontWeight: 600 }}>{s}</span>
+                          ))}
+                          {atsResult.extracted.skills.length > 6 && <span style={{ color: 'var(--text-muted)', fontSize: '0.73rem', alignSelf: 'center' }}>+{atsResult.extracted.skills.length - 6} more</span>}
+                        </div>
+                        <button
+                          className="btn-primary"
+                          onClick={() => {
+                            // Store skills in localStorage for the quiz page to consume
+                            localStorage.setItem('placeai_resume_quiz_skills', JSON.stringify(atsResult.extracted.skills));
+                            localStorage.setItem('placeai_resume_quiz_roles', JSON.stringify(atsResult.extracted.suggestedRoles));
+                            router.push('/aptitude/resume');
+                          }}
+                          style={{ width: '100%', padding: '12px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                        >
+                          🚀 Take Resume Based Quiz
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ) : null}
 

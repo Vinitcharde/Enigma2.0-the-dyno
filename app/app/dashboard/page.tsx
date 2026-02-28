@@ -116,26 +116,60 @@ export default function DashboardPage() {
     const email = encodeURIComponent(user.email);
 
     const checkNotifications = async () => {
+      // 1. Always read localStorage notifications (works when Supabase is paused)
+      try {
+        const stored: any[] = JSON.parse(localStorage.getItem('placeai_notifications') || '[]');
+        const myLocal = stored.filter(n => n.studentEmail === user!.email);
+        if (myLocal.length > 0) {
+          setNotifications(prev => {
+            const merged = [...prev];
+            for (const n of myLocal) {
+              const idx = merged.findIndex(x => x.id === n.id);
+              if (idx >= 0) merged[idx] = n; else merged.push(n);
+            }
+            return merged;
+          });
+          const unread = myLocal.find((n: any) => !n.read && !dismissedIds.has(n.id));
+          if (unread) {
+            setShowPopup(prev => (prev && prev.id === unread.id) ? prev : unread);
+            // Mark as read in localStorage
+            try {
+              const all: any[] = JSON.parse(localStorage.getItem('placeai_notifications') || '[]');
+              localStorage.setItem('placeai_notifications', JSON.stringify(
+                all.map(n => n.id === unread.id ? { ...n, read: true } : n)
+              ));
+            } catch {}
+          }
+        }
+      } catch {}
+
+      // 2. Also try Supabase (merge results)
       try {
         const res = await fetch(`/api/db?action=getNotifications&email=${email}`);
         if (res.ok) {
           const myNotifs = await res.json();
-          setNotifications(myNotifs);
+          setNotifications(prev => {
+            const merged = [...prev];
+            for (const n of myNotifs) {
+              const idx = merged.findIndex(x => x.id === n.id);
+              if (idx >= 0) merged[idx] = n; else merged.push(n);
+            }
+            return merged;
+          });
           const unread = myNotifs.find((n: Notification) => !n.read && !dismissedIds.has(n.id));
-          if (unread && (!showPopup || showPopup.id !== unread.id)) {
-            setShowPopup(unread);
-            // Mark as read
+          if (unread) {
+            setShowPopup(prev => (prev && prev.id === unread.id) ? prev : unread);
             fetch('/api/db', {
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ action: 'markNotificationRead', id: unread.id }),
-            }).catch(() => { });
+            }).catch(() => {});
           }
         }
-      } catch { }
+      } catch {}
     };
 
     checkNotifications();
-    const interval = setInterval(checkNotifications, 3000);
+    const interval = setInterval(checkNotifications, 10000); // 10s — was 3s
     return () => clearInterval(interval);
   }, [user, dismissedIds]);
 

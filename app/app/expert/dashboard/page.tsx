@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import Sidebar from '@/components/Sidebar';
-import { Calendar, Users, Star, Clock, CheckCircle, Book, TrendingUp, MessageSquare, User, ChevronRight, XCircle, AlertCircle, Video } from 'lucide-react';
+import { Calendar, Users, Star, CheckCircle, TrendingUp, MessageSquare, XCircle, Video } from 'lucide-react';
 
 interface Booking {
   id: string;
@@ -45,19 +45,119 @@ export default function ExpertDashboardPage() {
   const [allBookings, setAllBookings] = useState<Booking[]>([]);
   const [pastSessions, setPastSessions] = useState<{ studentName: string; role: string; date: string; rating: number; feedback: string }[]>([]);
   const [expertStats, setExpertStats] = useState({ totalSessions: 0, thisMonth: 0, avgRating: 0, positivePct: 0 });
+  const [bookingFilter, setBookingFilter] = useState<'all' | 'pending' | 'confirmed' | 'rejected'>('all');
 
   // Load bookings from DB API
   useEffect(() => {
     if (!user || user.role !== 'expert') return;
-    const loadBookings = async () => {
+    const expertIdKey = user.id.replace('expert-', '');
+    const expertName = user.name || '';
+    const expertCompany = user.company || '';
+
+    // Seed demo bookings the FIRST time an expert logs in (so bookings section is never empty)
+    const seedDemoBookings = () => {
       try {
-        const expertIdRaw = user.id.replace('expert-', '');
-        const res = await fetch(`/api/db?action=getBookingsByExpert&expertId=${encodeURIComponent(expertIdRaw)}`);
+        const all: any[] = JSON.parse(localStorage.getItem('placeai_bookings') || '[]');
+        const hasOwn = all.some(b => b.expertId === expertIdKey);
+        if (hasOwn) return; // already has bookings — don't seed again
+
+        const today = new Date();
+        const fmtDate = (offset: number) => {
+          const d = new Date(today);
+          d.setDate(today.getDate() + offset);
+          return d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+        };
+
+        const initials = (name: string) => name.split(' ').map(n => n[0]).join('');
+
+        const seeds: any[] = [
+          {
+            id: `demo-${expertIdKey}-1`,
+            studentId: 'student-demo', studentName: 'Rahul Sharma',
+            studentEmail: 'student@demo.com', college: 'IIT Bombay',
+            role: 'Full Stack Developer', expertId: expertIdKey,
+            expertName, expertCompany, expertDesignation: '',
+            expertAvatar: initials(expertName), expertColor: '#a78bfa',
+            date: fmtDate(1), time: '11:00 AM', status: 'pending',
+            skills: ['React', 'Node.js', 'MongoDB', 'TypeScript'],
+            aiScore: 74, weakAreas: ['System Design', 'Optimization'],
+            aptitudeScores: { quantitative: 80, logical: 72, verbal: 68 },
+            createdAt: new Date().toISOString(),
+          },
+          {
+            id: `demo-${expertIdKey}-2`,
+            studentId: 'student-demo2', studentName: 'Priya Kumari',
+            studentEmail: 'priya.k@demo.com', college: 'NIT Trichy',
+            role: 'Backend Engineer', expertId: expertIdKey,
+            expertName, expertCompany, expertDesignation: '',
+            expertAvatar: initials(expertName), expertColor: '#22d3ee',
+            date: fmtDate(2), time: '01:00 PM', status: 'pending',
+            skills: ['Java', 'Spring Boot', 'PostgreSQL', 'Docker'],
+            aiScore: 82, weakAreas: ['Distributed Systems'],
+            aptitudeScores: { quantitative: 85, logical: 78, verbal: 71 },
+            createdAt: new Date().toISOString(),
+          },
+          {
+            id: `demo-${expertIdKey}-3`,
+            studentId: 'student-demo3', studentName: 'Aman Singh',
+            studentEmail: 'aman.s@demo.com', college: 'BITS Pilani',
+            role: 'Data Scientist', expertId: expertIdKey,
+            expertName, expertCompany, expertDesignation: '',
+            expertAvatar: initials(expertName), expertColor: '#34d399',
+            date: fmtDate(0), time: '03:00 PM', status: 'approved',
+            meetingLink: `https://meet.jit.si/PlaceAI-Demo-${expertIdKey}`,
+            meetingRoom: `PlaceAI-Demo-${expertIdKey}`,
+            skills: ['Python', 'Pandas', 'Scikit-learn', 'SQL'],
+            aiScore: 88, weakAreas: ['Feature Engineering'],
+            aptitudeScores: { quantitative: 90, logical: 85, verbal: 78 },
+            createdAt: new Date(Date.now() - 86400000).toISOString(),
+          },
+        ];
+
+        all.push(...seeds);
+        localStorage.setItem('placeai_bookings', JSON.stringify(all));
+      } catch {}
+    };
+
+    seedDemoBookings();
+
+    const loadBookings = async () => {
+      // 1. Always load from localStorage (works when Supabase is paused)
+      let localBookings: Booking[] = [];
+      try {
+        const stored: any[] = JSON.parse(localStorage.getItem('placeai_bookings') || '[]');
+        localBookings = stored
+          .filter(b => b.expertId === expertIdKey)
+          .map(b => ({
+            id: b.id, studentName: b.studentName, studentEmail: b.studentEmail,
+            college: b.college, role: b.role, expertId: b.expertId,
+            expertName: b.expertName, expertCompany: b.expertCompany,
+            expertDesignation: b.expertDesignation, expertAvatar: b.expertAvatar,
+            expertColor: b.expertColor, date: b.date, time: b.time,
+            status: b.status, meetingLink: b.meetingLink, meetingRoom: b.meetingRoom,
+            createdAt: b.createdAt || '', skills: b.skills || [],
+            aiScore: b.aiScore || 0, weakAreas: b.weakAreas || [],
+            aptitudeScores: b.aptitudeScores || { quantitative: 0, logical: 0, verbal: 0 },
+          }));
+      } catch {}
+
+      // 2. Try DB and merge (DB result overwrites same ID from localStorage)
+      try {
+        const res = await fetch(`/api/db?action=getBookingsByExpert&expertId=${encodeURIComponent(expertIdKey)}`);
         if (res.ok) {
-          const data = await res.json();
-          setAllBookings(data);
+          const dbBookings: Booking[] = await res.json();
+          const merged = [...localBookings];
+          for (const db of dbBookings) {
+            const idx = merged.findIndex(b => b.id === db.id);
+            if (idx >= 0) merged[idx] = db; else merged.push(db);
+          }
+          setAllBookings(merged);
+          return;
         }
       } catch {}
+
+      // 3. Supabase unavailable — use localStorage only
+      setAllBookings(localBookings);
     };
     const loadFeedback = async () => {
       try {
@@ -98,7 +198,12 @@ export default function ExpertDashboardPage() {
 
   const pendingBookings = allBookings.filter(b => b.status === 'pending');
   const confirmedBookings = allBookings.filter(b => b.status === 'confirmed' || b.status === 'approved');
-  const UPCOMING_BOOKINGS = [...confirmedBookings, ...pendingBookings];
+  const rejectedBookings = allBookings.filter(b => b.status === 'rejected');
+
+  const filteredBookings = bookingFilter === 'all' ? allBookings
+    : bookingFilter === 'pending' ? pendingBookings
+    : bookingFilter === 'confirmed' ? confirmedBookings
+    : rejectedBookings;
 
   const selectedBooking = allBookings.find(b => b.id === selectedStudentId);
 
@@ -123,35 +228,49 @@ export default function ExpertDashboardPage() {
   };
 
   const handleApprove = async (bookingId: string) => {
-    // Generate a unique meeting room for this interview
     const meetingRoom = generateMeetingRoom(bookingId);
     const meetingLink = `https://meet.jit.si/${meetingRoom}`;
+    const booking = allBookings.find(b => b.id === bookingId);
 
+    // Update localStorage immediately (works without DB)
+    try {
+      const stored: any[] = JSON.parse(localStorage.getItem('placeai_bookings') || '[]');
+      localStorage.setItem('placeai_bookings', JSON.stringify(
+        stored.map(b => b.id === bookingId ? { ...b, status: 'approved', meetingLink, meetingRoom } : b)
+      ));
+      if (booking) {
+        const notifs: any[] = JSON.parse(localStorage.getItem('placeai_notifications') || '[]');
+        notifs.push({
+          id: `notif-${Date.now()}`, type: 'approved',
+          studentEmail: booking.studentEmail,
+          expertName: booking.expertName, expertCompany: booking.expertCompany,
+          role: booking.role, date: booking.date, time: booking.time,
+          meetingLink, meetingRoom,
+          message: `Your interview with ${booking.expertName} (${booking.expertCompany}) for ${booking.role} on ${booking.date} at ${booking.time} has been APPROVED! ✅ Click Join to start your video interview.`,
+          read: false, createdAt: new Date().toISOString(),
+        });
+        localStorage.setItem('placeai_notifications', JSON.stringify(notifs));
+      }
+    } catch {}
+
+    // Also try Supabase
     try {
       await fetch('/api/db', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'updateBookingStatus', bookingId, status: 'approved', meetingRoom, meetingLink }),
       });
-
-      // Also add a notification for the student with meeting link
-      const booking = allBookings.find(b => b.id === bookingId);
       if (booking) {
         await fetch('/api/db', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'createNotification',
             notification: {
-              id: `notif-${Date.now()}`,
-              type: 'approved',
+              id: `notif-db-${Date.now()}`, type: 'approved',
               studentEmail: booking.studentEmail,
-              expertName: booking.expertName,
-              expertCompany: booking.expertCompany,
-              role: booking.role,
-              date: booking.date,
-              time: booking.time,
-              meetingLink,
-              meetingRoom,
-              message: `Your interview with ${booking.expertName} (${booking.expertCompany}) for ${booking.role} on ${booking.date} at ${booking.time} has been APPROVED! ✅ Click Join to start your video interview.`,
+              expertName: booking.expertName, expertCompany: booking.expertCompany,
+              role: booking.role, date: booking.date, time: booking.time,
+              meetingLink, meetingRoom,
+              message: `Your interview with ${booking.expertName} (${booking.expertCompany}) for ${booking.role} on ${booking.date} at ${booking.time} has been APPROVED! ✅`,
             },
           }),
         });
@@ -162,27 +281,44 @@ export default function ExpertDashboardPage() {
   };
 
   const handleReject = async (bookingId: string) => {
+    const booking = allBookings.find(b => b.id === bookingId);
+
+    // Update localStorage immediately
+    try {
+      const stored: any[] = JSON.parse(localStorage.getItem('placeai_bookings') || '[]');
+      localStorage.setItem('placeai_bookings', JSON.stringify(
+        stored.map(b => b.id === bookingId ? { ...b, status: 'rejected' } : b)
+      ));
+      if (booking) {
+        const notifs: any[] = JSON.parse(localStorage.getItem('placeai_notifications') || '[]');
+        notifs.push({
+          id: `notif-${Date.now()}`, type: 'rejected',
+          studentEmail: booking.studentEmail,
+          expertName: booking.expertName, expertCompany: booking.expertCompany,
+          role: booking.role, date: booking.date, time: booking.time,
+          message: `Your interview with ${booking.expertName} (${booking.expertCompany}) for ${booking.role} on ${booking.date} at ${booking.time} was not approved. Please try another slot.`,
+          read: false, createdAt: new Date().toISOString(),
+        });
+        localStorage.setItem('placeai_notifications', JSON.stringify(notifs));
+      }
+    } catch {}
+
+    // Also try Supabase
     try {
       await fetch('/api/db', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'updateBookingStatus', bookingId, status: 'rejected' }),
       });
-
-      const booking = allBookings.find(b => b.id === bookingId);
       if (booking) {
         await fetch('/api/db', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action: 'createNotification',
             notification: {
-              id: `notif-${Date.now()}`,
-              type: 'rejected',
+              id: `notif-db-${Date.now()}`, type: 'rejected',
               studentEmail: booking.studentEmail,
-              expertName: booking.expertName,
-              expertCompany: booking.expertCompany,
-              role: booking.role,
-              date: booking.date,
-              time: booking.time,
+              expertName: booking.expertName, expertCompany: booking.expertCompany,
+              role: booking.role, date: booking.date, time: booking.time,
               message: `Your interview with ${booking.expertName} (${booking.expertCompany}) for ${booking.role} on ${booking.date} at ${booking.time} was not approved. Please try another slot.`,
             },
           }),
@@ -336,7 +472,7 @@ export default function ExpertDashboardPage() {
           <h1 style={{ fontSize: '1.8rem', fontWeight: 800, color: 'white', marginBottom: 6 }}>
             Expert Dashboard
           </h1>
-          <p style={{ color: 'var(--text-secondary)' }}>Welcome back, {user.name}. You have {confirmedBookings.length} confirmed and {pendingBookings.length} pending sessions.</p>
+          <p style={{ color: 'var(--text-secondary)' }}>Welcome back, {user.name}. You have {confirmedBookings.length} confirmed, {pendingBookings.length} pending, and {rejectedBookings.length} rejected session{allBookings.length !== 1 ? 's' : ''}.</p>
         </div>
 
         {/* Stats */}
@@ -358,128 +494,143 @@ export default function ExpertDashboardPage() {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 24 }}>
-          {/* Upcoming bookings */}
+          {/* Bookings panel with filter tabs */}
           <div>
-            {/* Pending Approval Section */}
-            {pendingBookings.length > 0 && (
-              <div className="card-no-hover" style={{ padding: 28, marginBottom: 24, border: '1px solid rgba(245,158,11,0.3)' }}>
-                <h2 style={{ fontWeight: 700, color: '#f59e0b', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <AlertCircle size={18} color="#f59e0b" /> Pending Approval ({pendingBookings.length})
-                </h2>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  {pendingBookings.map(booking => (
-                    <div key={booking.id} style={{ padding: '18px', borderRadius: 12, border: '1px solid rgba(245,158,11,0.25)', background: 'rgba(245,158,11,0.05)' }}>
-                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                          <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--gradient-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.9rem', color: 'white' }}>
-                            {booking.studentName.split(' ').map(n => n[0]).join('')}
-                          </div>
-                          <div>
-                            <div style={{ fontWeight: 700, color: 'white', fontSize: '0.95rem' }}>{booking.studentName}</div>
-                            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{booking.college}</div>
-                          </div>
+            {/* Filter Tabs */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 20, background: 'var(--bg-card)', borderRadius: 12, padding: '6px', border: '1px solid var(--border)' }}>
+              {(
+                [['all', `All (${allBookings.length})`, 'white'],
+                 ['pending', `Pending (${pendingBookings.length})`, '#f59e0b'],
+                 ['confirmed', `Confirmed (${confirmedBookings.length})`, '#34d399'],
+                 ['rejected', `Rejected (${rejectedBookings.length})`, '#f87171']] as [string, string, string][]
+              ).map(([key, label, color]) => (
+                <button key={key} onClick={() => setBookingFilter(key as any)} style={{
+                  flex: 1, padding: '8px 12px', borderRadius: 8, border: 'none',
+                  background: bookingFilter === key ? 'rgba(124,58,237,0.25)' : 'transparent',
+                  color: bookingFilter === key ? color : 'var(--text-muted)',
+                  fontWeight: bookingFilter === key ? 700 : 500,
+                  fontSize: '0.82rem', cursor: 'pointer', transition: 'all 0.2s',
+                  outline: bookingFilter === key ? '1px solid rgba(124,58,237,0.5)' : 'none',
+                }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Booking cards */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {filteredBookings.length === 0 ? (
+                <div className="card-no-hover" style={{ padding: 40, textAlign: 'center' }}>
+                  <div style={{ fontSize: '2rem', marginBottom: 12 }}>📭</div>
+                  <div style={{ fontWeight: 600, color: 'white', marginBottom: 6 }}>No bookings found</div>
+                  <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>Students haven&apos;t booked any sessions yet, or try a different filter.</div>
+                </div>
+              ) : filteredBookings.map(booking => {
+                const isPending = booking.status === 'pending';
+                const isConfirmed = booking.status === 'confirmed' || booking.status === 'approved';
+                const isRejected = booking.status === 'rejected';
+                const borderColor = isPending ? 'rgba(245,158,11,0.3)'
+                  : isConfirmed ? 'rgba(16,185,129,0.3)'
+                  : 'rgba(239,68,68,0.2)';
+                const bgColor = isPending ? 'rgba(245,158,11,0.04)'
+                  : isConfirmed ? 'rgba(16,185,129,0.04)'
+                  : 'rgba(239,68,68,0.04)';
+                return (
+                  <div key={booking.id} style={{ padding: '20px', borderRadius: 14, border: `1px solid ${borderColor}`, background: bgColor }}>
+                    {/* Header row */}
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{ width: 46, height: 46, borderRadius: '50%', background: 'var(--gradient-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.95rem', color: 'white', flexShrink: 0 }}>
+                          {booking.studentName.split(' ').map((n: string) => n[0]).join('')}
                         </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <span className="badge" style={{ fontSize: '0.72rem', background: 'rgba(245,158,11,0.15)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)' }}>⏳ Pending</span>
+                        <div>
+                          <div style={{ fontWeight: 700, color: 'white', fontSize: '0.98rem' }}>{booking.studentName}</div>
+                          <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 2 }}>{booking.college}</div>
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: 16, marginBottom: 14, fontSize: '0.82rem' }}>
-                        <span style={{ color: 'var(--text-secondary)' }}>🎯 {booking.role}</span>
-                        <span style={{ color: 'var(--text-secondary)' }}>📅 {booking.date}</span>
-                        <span style={{ color: 'var(--text-secondary)' }}>🕐 {booking.time}</span>
+                      <div>
+                        {isPending && <span className="badge" style={{ fontSize: '0.72rem', background: 'rgba(245,158,11,0.15)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)' }}>⏳ Pending</span>}
+                        {isConfirmed && <span className="badge badge-green" style={{ fontSize: '0.72rem' }}>✓ {booking.status === 'approved' ? 'Approved' : 'Confirmed'}</span>}
+                        {isRejected && <span className="badge" style={{ fontSize: '0.72rem', background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>✗ Rejected</span>}
                       </div>
-                      <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
-                        {booking.skills.slice(0, 3).map(s => <span key={s} className="badge badge-purple" style={{ fontSize: '0.7rem' }}>{s}</span>)}
-                        {booking.skills.length > 3 && <span className="badge badge-blue" style={{ fontSize: '0.7rem' }}>+{booking.skills.length - 3}</span>}
-                      </div>
-                      <div style={{ display: 'flex', gap: 10 }}>
-                        <button onClick={() => handleApprove(booking.id)} style={{
-                          flex: 1, padding: '10px', borderRadius: 10, border: '1px solid rgba(16,185,129,0.4)',
-                          background: 'rgba(16,185,129,0.15)', color: '#34d399', fontWeight: 700, fontSize: '0.85rem',
-                          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                          transition: 'all 0.2s',
+                    </div>
+
+                    {/* Meta */}
+                    <div style={{ display: 'flex', gap: 16, marginBottom: 12, fontSize: '0.82rem', flexWrap: 'wrap' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>🎯 {booking.role}</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>📅 {booking.date}</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>🕐 {booking.time}</span>
+                      <span style={{ color: '#a78bfa', fontSize: '0.78rem', fontWeight: 600 }}>AI Score: {booking.aiScore}%</span>
+                    </div>
+
+                    {/* Skills */}
+                    <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+                      {booking.skills.slice(0, 4).map((s: string) => <span key={s} className="badge badge-purple" style={{ fontSize: '0.7rem' }}>{s}</span>)}
+                      {booking.skills.length > 4 && <span className="badge badge-blue" style={{ fontSize: '0.7rem' }}>+{booking.skills.length - 4}</span>}
+                      {booking.weakAreas[0] && <span style={{ marginLeft: 4, color: '#f87171', fontSize: '0.74rem', alignSelf: 'center' }}>⚠ {booking.weakAreas[0]}</span>}
+                    </div>
+
+                    {/* Action buttons */}
+                    {!isRejected && (
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        {isPending && (
+                          <>
+                            <button onClick={() => handleApprove(booking.id)} style={{
+                              flex: 1, padding: '10px', borderRadius: 10, border: '1px solid rgba(16,185,129,0.4)',
+                              background: 'rgba(16,185,129,0.15)', color: '#34d399', fontWeight: 700, fontSize: '0.85rem',
+                              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                            }}>
+                              <CheckCircle size={16} /> Approve
+                            </button>
+                            <button onClick={() => handleReject(booking.id)} style={{
+                              flex: 1, padding: '10px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.4)',
+                              background: 'rgba(239,68,68,0.1)', color: '#f87171', fontWeight: 700, fontSize: '0.85rem',
+                              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                            }}>
+                              <XCircle size={16} /> Reject
+                            </button>
+                          </>
+                        )}
+                        {isConfirmed && booking.meetingRoom && (
+                          <button onClick={() => router.push(buildMeetingUrl(booking, booking.meetingRoom!))} style={{
+                            flex: 1, padding: '10px', borderRadius: 10, border: '1px solid rgba(16,185,129,0.4)',
+                            background: 'rgba(16,185,129,0.15)', color: '#34d399', fontWeight: 700, fontSize: '0.85rem',
+                            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                          }}>
+                            <Video size={16} /> Join Interview
+                          </button>
+                        )}
+                        <button onClick={() => { setSelectedStudentId(booking.id); setActiveView('student'); }} style={{
+                          flex: isConfirmed ? 1 : 'unset' as any,
+                          padding: '10px 16px', borderRadius: 10, border: '1px solid var(--border)',
+                          background: 'transparent', color: 'var(--text-secondary)', fontWeight: 600, fontSize: '0.82rem',
+                          cursor: 'pointer', whiteSpace: 'nowrap',
                         }}>
-                          <CheckCircle size={16} /> Approve
+                          View Profile →
                         </button>
-                        <button onClick={() => handleReject(booking.id)} style={{
-                          flex: 1, padding: '10px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.4)',
-                          background: 'rgba(239,68,68,0.1)', color: '#f87171', fontWeight: 700, fontSize: '0.85rem',
-                          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                          transition: 'all 0.2s',
+                      </div>
+                    )}
+                    {isRejected && (
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button onClick={() => handleApprove(booking.id)} style={{
+                          padding: '9px 18px', borderRadius: 10, border: '1px solid rgba(16,185,129,0.4)',
+                          background: 'rgba(16,185,129,0.1)', color: '#34d399', fontWeight: 600, fontSize: '0.82rem',
+                          cursor: 'pointer',
                         }}>
-                          <XCircle size={16} /> Reject
+                          Re-approve
                         </button>
                         <button onClick={() => { setSelectedStudentId(booking.id); setActiveView('student'); }} style={{
-                          padding: '10px 16px', borderRadius: 10, border: '1px solid var(--border)',
+                          padding: '9px 18px', borderRadius: 10, border: '1px solid var(--border)',
                           background: 'transparent', color: 'var(--text-secondary)', fontWeight: 600, fontSize: '0.82rem',
                           cursor: 'pointer',
                         }}>
                           View Profile
                         </button>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Confirmed Bookings */}
-            <div className="card-no-hover" style={{ padding: 28 }}>
-              <h2 style={{ fontWeight: 700, color: 'white', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Calendar size={18} color="var(--accent-cyan)" /> Confirmed Interviews ({confirmedBookings.length})
-              </h2>
-              {confirmedBookings.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-                  No confirmed interviews yet.
-                </div>
-              ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                {confirmedBookings.map(booking => (
-                <div key={booking.id} style={{ padding: '18px', borderRadius: 12, border: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'var(--gradient-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.9rem', color: 'white' }}>
-                        {booking.studentName.split(' ').map(n => n[0]).join('')}
-                      </div>
-                      <div>
-                        <div style={{ fontWeight: 700, color: 'white', fontSize: '0.95rem' }}>{booking.studentName}</div>
-                        <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>{booking.college}</div>
-                      </div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <span className="badge badge-green" style={{ fontSize: '0.72rem' }}>✓ {booking.status === 'approved' ? 'Approved' : 'Confirmed'}</span>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 16, marginBottom: 14, fontSize: '0.82rem' }}>
-                    <span style={{ color: 'var(--text-secondary)' }}>🎯 {booking.role}</span>
-                    <span style={{ color: 'var(--text-secondary)' }}>📅 {booking.date}</span>
-                    <span style={{ color: 'var(--text-secondary)' }}>🕐 {booking.time}</span>
-                  </div>
-                  <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
-                    {booking.skills.slice(0, 3).map(s => <span key={s} className="badge badge-purple" style={{ fontSize: '0.7rem' }}>{s}</span>)}
-                    {booking.skills.length > 3 && <span className="badge badge-blue" style={{ fontSize: '0.7rem' }}>+{booking.skills.length - 3}</span>}
-                    <span style={{ marginLeft: 4, color: '#f87171', fontSize: '0.76rem', alignSelf: 'center' }}>
-                      ⚠ Weak: {booking.weakAreas[0]}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', gap: 10 }}>
-                    {booking.meetingRoom && (
-                      <button onClick={() => router.push(buildMeetingUrl(booking, booking.meetingRoom!))} style={{
-                        flex: 1, padding: '10px', borderRadius: 10, border: '1px solid rgba(16,185,129,0.4)',
-                        background: 'rgba(16,185,129,0.15)', color: '#34d399', fontWeight: 700, fontSize: '0.85rem',
-                        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                      }}>
-                        <Video size={16} /> Join Interview
-                      </button>
                     )}
-                    <button className="btn-primary" onClick={() => { setSelectedStudentId(booking.id); setActiveView('student'); }} style={{ flex: 1, padding: '10px', fontSize: '0.85rem' }}>
-                      View Profile & Rate →
-                    </button>
                   </div>
-                </div>
-              ))}
-              </div>
-              )}
+                );
+              })}
             </div>
           </div>
 

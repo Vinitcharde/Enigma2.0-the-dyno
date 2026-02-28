@@ -8,8 +8,21 @@ import { Calendar, Clock, User, Star, Briefcase, CheckCircle, ChevronRight, Sear
 
 const JOB_ROLES = ['Full Stack Developer', 'Backend Engineer', 'Data Scientist', 'ML Engineer', 'Frontend Developer', 'DevOps Engineer', 'Product Manager'];
 
+interface Expert {
+  id: string;
+  name: string;
+  company: string;
+  designation: string;
+  expertise: string[];
+  rating: number;
+  sessions: number;
+  avatar: string;
+  color: string;
+  bio: string;
+}
+
 // Domain-specific experts mapped to each role
-const ROLE_EXPERTS: Record<string, typeof EXPERTS_ALL[number][]> = {
+const ROLE_EXPERTS: Record<string, Expert[]> = {
   'Full Stack Developer': [
     { id: 'fs1', name: 'Priya Mehta', company: 'Google', designation: 'Senior SWE', expertise: ['React', 'Node.js', 'System Design'], rating: 4.9, sessions: 142, avatar: 'PM', color: '#a78bfa', bio: '8+ years at Google. Ex-interviewer for 3 years. Built multiple full-stack products used by millions.' },
     { id: 'fs2', name: 'Rohit Jain', company: 'Flipkart', designation: 'Staff Engineer', expertise: ['Next.js', 'TypeScript', 'Microservices'], rating: 4.7, sessions: 89, avatar: 'RJ', color: '#22d3ee', bio: 'Staff Engineer at Flipkart. Full stack expert with 6+ years. Mentored 200+ students.' },
@@ -66,6 +79,18 @@ const NEXT_3_DAYS = (() => {
   return days;
 })();
 
+// Maps short ROLE_EXPERTS IDs → email-username IDs used in auth-context (e.g. 'fs1' → 'priya.mehta')
+// This ensures getBookingsByExpert(user.id.replace('expert-', '')) always matches
+const EXPERT_ID_MAP: Record<string, string> = {
+  fs1: 'priya.mehta',   fs2: 'rohit.jain',    fs3: 'ananya.das',
+  be1: 'arjun.kapoor',  be2: 'karthik.rao',   be3: 'neha.gupta',
+  ds1: 'sneha.reddy',   ds2: 'aditya.sharma', ds3: 'ritu.patel',
+  ml1: 'vikram.iyer',   ml2: 'deepa.nair',    ml3: 'saurabh.verma',
+  fe1: 'kavya.krishnan',fe2: 'manish.tiwari', fe3: 'shruti.bose',
+  do1: 'rajesh.kumar',  do2: 'pooja.singh',   do3: 'amit.desai',
+  pm1: 'vikram.singh',  pm2: 'megha.arora',   pm3: 'nitin.bhatt',
+};
+
 // Returns true if the given date+time slot is in the past
 function isSlotExpired(date: string, time: string): boolean {
   const now = new Date();
@@ -105,7 +130,9 @@ export default function BookInterviewPage() {
   const handleBook = async () => {
     setIsSubmitting(true);
 
-    // Save booking to DB via API
+    // Resolve expert ID: map short ID (fs1) → email-based ID (priya.mehta)
+    const resolvedExpertId = EXPERT_ID_MAP[selectedExpert] || selectedExpert;
+
     const booking = {
       id: `booking-${Date.now()}`,
       studentId: user.id,
@@ -113,7 +140,7 @@ export default function BookInterviewPage() {
       studentEmail: user.email,
       college: user.college || 'N/A',
       role: selectedRole,
-      expertId: selectedExpert,
+      expertId: resolvedExpertId,
       expertName: expert?.name || '',
       expertCompany: expert?.company || '',
       expertDesignation: expert?.designation || '',
@@ -126,15 +153,23 @@ export default function BookInterviewPage() {
       aiScore: 79,
       weakAreas: ['System Design', 'Optimization'],
       aptitudeScores: { quantitative: 82, logical: 78, verbal: 65 },
+      createdAt: new Date().toISOString(),
     };
 
+    // Always save to localStorage first (works even when Supabase is paused)
+    try {
+      const existing: any[] = JSON.parse(localStorage.getItem('placeai_bookings') || '[]');
+      existing.push(booking);
+      localStorage.setItem('placeai_bookings', JSON.stringify(existing));
+    } catch {}
+
+    // Also try Supabase (silently ignored if unavailable)
     try {
       await fetch('/api/db', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'createBooking', booking }),
       });
-      // Log activity
       await fetch('/api/db', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -3,7 +3,7 @@ import OpenAI from 'openai';
 
 export async function POST(req: NextRequest) {
   try {
-    const { section, count = 10 } = await req.json();
+    const { section, count = 10, skills, roles } = await req.json();
 
     if (!process.env.SAMBANOVA_API_KEY) {
       return NextResponse.json({ success: false, error: 'API key not configured' }, { status: 500 });
@@ -15,9 +15,26 @@ export async function POST(req: NextRequest) {
       verbal: `Generate ${count} Verbal Ability MCQ questions covering: Synonyms, Antonyms, Grammar Correction, Sentence Completion, Reading Comprehension, Idioms, One-Word Substitution, Para Jumbles, Analogies, Spelling. Questions should be placement-exam level.`,
     };
 
-    const prompt = sectionPrompts[section];
-    if (!prompt) {
-      return NextResponse.json({ success: false, error: 'Invalid section' }, { status: 400 });
+    let prompt: string;
+
+    if (section === 'resume' && Array.isArray(skills) && skills.length > 0) {
+      const skillList = skills.slice(0, 12).join(', ');
+      const roleHint = Array.isArray(roles) && roles.length > 0
+        ? ` The candidate is targeting roles like: ${roles.slice(0, 2).join(', ')}.`
+        : '';
+      prompt = `Generate ${count} technical MCQ interview questions specifically based on the following skills from the candidate's resume: ${skillList}.${roleHint}
+
+Cover conceptual understanding, hands-on usage, best practices, debugging scenarios, and comparison questions. Mix approximately:
+- 40% core concept questions (e.g., "What does X do?", "How does Y work?")
+- 30% practical/scenario questions (e.g., "You need to optimise X, what approach?")
+- 30% comparison/tradeoff questions (e.g., "When would you use X over Y?")
+Difficulty: ~25% Easy, ~50% Medium, ~25% Hard.
+Questions should feel like real technical interview questions asked by top tech companies.`;
+    } else {
+      prompt = sectionPrompts[section];
+      if (!prompt) {
+        return NextResponse.json({ success: false, error: 'Invalid section' }, { status: 400 });
+      }
     }
 
     const openai = new OpenAI({
